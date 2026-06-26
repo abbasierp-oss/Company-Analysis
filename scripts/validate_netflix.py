@@ -69,11 +69,11 @@ def run_netflix():
         'section4_quarterly': 'quarterly financial anchor only' in report.lower() or 'Quarterly anchor' in report,
         'section4_eps': 'EPS' in report.split('Section 4')[1].split('Section 5')[0] if 'Section 4' in report else False,
         'no_8k_as_anchor': '8-K reference only' in report or 'reference only' in report.lower(),
-        'warner_flag_or_netflix_q1': (
-            'Warner Bros' in report
-            or 'termination fee' in report.lower()
-            or 'Q1' in report
-        ),
+        'market_cap_yahoo': 'Yahoo Finance' in report.split('Section 2c')[1][:1500] if 'Section 2c' in report else False,
+        'diluted_shares_row': 'Weighted-Avg Diluted Shares' in report,
+        'gaps_logged': 'Gaps and limitations' in report and 'None logged' not in report.split('Section 8')[1][:800] if 'Section 8' in report else True,
+        'rtbl_warner': 'warner' in report.lower() or 'capital structure' in report.lower() or 'termination fee' in report.lower(),
+        'analyst_proposal': 'Analyst Recommendations' in report or 'Recommended priorities' in report,
     }
 
     print('Results:')

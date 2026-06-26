@@ -58,6 +58,7 @@ if (!state.sections.s2_market_data) {
   ].join('\n');
 }
 
+const allGaps = aggregateReportGaps(state);
 state.sections.s8_assumptions = state.sections.s8_assumptions || [
   '## Section 8: Assumptions, Data Gaps & Reliability Notes',
   '',
@@ -66,11 +67,12 @@ state.sections.s8_assumptions = state.sections.s8_assumptions || [
   `Quarterly anchor: ${freshness.quarterly_anchor_form || 'N/A'} (${freshness.quarterly_anchor_report_date || 'N/A'})`,
   `Annual anchor: ${freshness.annual_anchor_form || 'N/A'} (${freshness.annual_anchor_report_date || 'N/A'})`,
   `Recent 8-K (reference only): ${freshness.recent_8k_form || 'N/A'} (${freshness.recent_8k_filing_date || 'N/A'})`,
+  `Market data: ${freshness.market_data_source || 'Yahoo Finance'} @ ${freshness.market_price_as_of || 'N/A'}`,
   '',
   `Reliability map: ${JSON.stringify(state.normalized?.reliability_map || {})}`,
   '',
-  'Gaps:',
-  (state.normalized?.gaps || []).map((g) => `- ${g.metric}: ${g.reason}`).join('\n') || '- None logged.',
+  `Gaps and limitations (${allGaps.length}):`,
+  allGaps.map((g) => `- ${g.metric}: ${g.reason}`).join('\n') || '- None logged.',
   '',
   `Formulas: ${JSON.stringify(state.normalized?.formulas || {})}`,
 ].join('\n');
@@ -102,7 +104,7 @@ const citationQa = {
   proposal_ready: Boolean(state.sections.s6_proposal),
   data_freshness_recorded: Boolean(freshness.fetched_at),
   filing_anchors_recorded: Boolean(anchors.quarterly_10q || anchors.annual_10k),
-  gap_count: state.normalized?.source_coverage?.gap_count || (state.normalized?.gaps || []).length,
+  gap_count: aggregateReportGaps(state).length,
   warning_notes: [],
 };
 if (!citationQa.peer_benchmark_ready) citationQa.warning_notes.push('Peer table withheld or incomplete — core FY metrics not populated consistently.');

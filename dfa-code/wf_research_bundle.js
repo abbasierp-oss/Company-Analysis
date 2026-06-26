@@ -84,7 +84,8 @@ state.research.news_event_jobs = {
   serper_queries: [
     `${state.entity?.legal_name || state.inputs?.company_name} earnings transcript 2024 2025`,
     `${state.entity?.legal_name || state.inputs?.company_name} restructuring acquisition CEO CFO 2024 2025`,
-    `${state.entity?.legal_name || state.inputs?.company_name} investor relations press release 2025`,
+    `${state.entity?.legal_name || state.inputs?.company_name} shareholder letter 2026`,
+    `${state.entity?.legal_name || state.inputs?.company_name} warner bros termination fee 2026`,
   ],
   confidence: recentFilings.length ? 'MEDIUM' : 'LOW',
 };

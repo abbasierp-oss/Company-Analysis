@@ -146,6 +146,18 @@ const quarterlyRows = [
   snapshotRow('free_cash_flow', 'Free Cash Flow (FCF)', qAnchor, 'usd'),
 ];
 
+const dilutedWa = qAnchor ? dilutedSharesAtAnchor(facts, qAnchor) : null;
+if (dilutedWa) {
+  quarterlyRows.push({
+    metric: 'weighted_avg_diluted_shares',
+    label: 'Weighted-Avg Diluted Shares',
+    value_display: Number(dilutedWa.value).toLocaleString('en-US'),
+    reporting_period: dilutedWa.reporting_period || qAnchor?.report_date || 'N/A',
+    source: `${dilutedWa.source_name} — quarterly filing anchor; not market-implied shares`,
+    raw: { value: dilutedWa.value, unit: 'shares', source_name: dilutedWa.source_name, reporting_period: dilutedWa.reporting_period },
+  });
+}
+
 const annualRows = [
   snapshotRow('revenue', 'Revenue', fyAnchor, 'usd'),
   snapshotRow('operating_margin', 'Operating Margin', fyAnchor, 'ratio', 'Operating income / revenue'),
@@ -160,28 +172,34 @@ const annualRows = [
 const market = state.research?.market_data || {};
 const marketRows = [
   {
-    label: 'Market Cap',
+    label: 'Market Cap (Yahoo Finance)',
     value_display: market.market_cap_usd != null ? fmtUsdValue(market.market_cap_usd) : 'N/A',
     reporting_period: market.source_date || 'latest',
-    source: market.math_note || market.source_name || 'Market data',
+    source: `${market.market_cap_source || 'Yahoo Finance meta.marketCap'} @ ${market.source_date || 'N/A'}`,
   },
   {
-    label: 'Share Price',
+    label: 'Share Price (Yahoo Finance)',
     value_display: market.share_price_usd != null ? fmtUsdValue(market.share_price_usd) : 'N/A',
     reporting_period: market.source_date || 'latest',
-    source: 'Yahoo Finance',
+    source: `Yahoo Finance @ ${market.source_date || 'N/A'}`,
   },
   {
-    label: 'Shares Outstanding',
+    label: 'Shares Outstanding (DEI, point-in-time)',
     value_display: market.shares_outstanding != null ? Number(market.shares_outstanding).toLocaleString('en-US') : 'N/A',
-    reporting_period: market.shares_filed || market.source_date || 'latest',
-    source: market.shares_source || 'SEC DEI / Yahoo Finance',
+    reporting_period: market.shares_outstanding_as_of || 'N/A',
+    source: market.shares_outstanding_source || 'SEC DEI',
+  },
+  {
+    label: 'Weighted-Avg Diluted Shares (10-Q anchor)',
+    value_display: market.weighted_avg_diluted_shares != null ? Number(market.weighted_avg_diluted_shares).toLocaleString('en-US') : 'N/A',
+    reporting_period: market.weighted_avg_diluted_shares_period || qAnchor?.report_date || 'N/A',
+    source: market.weighted_avg_diluted_shares_source || 'SEC EDGAR quarterly anchor',
   },
   {
     label: 'Implied Shares (market cap ÷ price)',
     value_display: market.implied_shares_outstanding != null ? Number(market.implied_shares_outstanding).toLocaleString('en-US', { maximumFractionDigits: 0 }) : 'N/A',
     reporting_period: market.source_date || 'latest',
-    source: market.math_consistent ? 'Verified consistent with shares outstanding' : 'Reconciled from price × shares',
+    source: market.implied_shares_note || 'Market-derived; not a filing share count',
   },
 ];
 
@@ -218,14 +236,22 @@ const markdownAnnual = tableMarkdown(
   fyAnchorNote,
   annualRows,
 );
-const markdownMarket = tableMarkdown(
-  '## Section 2c: Market Data',
-  'Market data is separate from SEC filing anchors. All values in USD.',
-  marketRows,
-);
+const markdownMarket = [
+  tableMarkdown(
+    '## Section 2c: Market Data',
+    `Single live source: Yahoo Finance @ ${market.source_date || 'N/A'}. ${market.math_note || ''} Share counts below are distinct concepts — do not mix DEI shares outstanding, quarterly weighted-average diluted shares, and market-implied shares.`,
+    marketRows,
+  ),
+].join('\n');
+
+const unusualLines = unusualQuarterNotes(state);
+const markdownQuarterlyWithNotes = [
+  markdownQuarterly,
+  ...(unusualLines.length ? ['', '### Unusual quarter items (GAAP)', ...unusualLines, '', 'All figures above are GAAP from SEC filings unless noted. Non-GAAP/adjusted metrics are not shown in this table.'] : []),
+].join('\n');
 
 const markdown = [
-  markdownQuarterly,
+  markdownQuarterlyWithNotes,
   '',
   markdownAnnual,
   '',
@@ -241,13 +267,13 @@ state.financial_snapshot = {
   generated_at: now,
   currency: 'USD',
   filing_anchors: anchors,
-  quarterly: { anchor: qAnchor, period_label: qPeriodLabel, rows: quarterlyRows, markdown: markdownQuarterly },
+  quarterly: { anchor: qAnchor, period_label: qPeriodLabel, rows: quarterlyRows, markdown: markdownQuarterlyWithNotes },
   annual: { anchor: fyAnchor, period_label: fyPeriodLabel, rows: annualRows, markdown: markdownAnnual },
   market_data: { rows: marketRows, markdown: markdownMarket },
   markdown,
 };
 state.sections = state.sections || {};
-state.sections.s2_quarterly = markdownQuarterly;
+state.sections.s2_quarterly = markdownQuarterlyWithNotes;
 state.sections.s2_annual = markdownAnnual;
 state.sections.s2_market_data = markdownMarket;
 state.sections.s2_snapshot = markdown;

@@ -364,9 +364,13 @@ function resolveFilingAnchors(recentFilings, issuerProfile) {
 
 function anchorPeriodLabel(anchor) {
   if (!anchor) return 'N/A';
-  if (anchor.fp && anchor.fy) return `${anchor.fp} FY${anchor.fy}`;
+  const fyStr = (fy) => {
+    const s = String(fy);
+    return s.startsWith('FY') ? s : `FY${s}`;
+  };
+  if (anchor.fp && anchor.fy) return `${anchor.fp} ${fyStr(anchor.fy)}`;
   if (anchor.report_date) return anchor.report_date;
-  if (anchor.fy) return `FY${anchor.fy}`;
+  if (anchor.fy) return fyStr(anchor.fy);
   return anchor.filing_date || 'N/A';
 }
 
@@ -432,7 +436,7 @@ function detectOneTimeItems(state) {
   const flags = [];
   const company = normName(state.entity?.legal_name || state.inputs?.company_name || '');
   const newsText = (state.research?.news_events || [])
-    .map((e) => `${e.title || ''} ${e.description || ''}`)
+    .map((e) => `${e.title || ''} ${e.description || e.snippet || ''}`)
     .join(' ')
     .toLowerCase();
   const filingText = (state.research?.filings?.recent_filings || [])
@@ -447,7 +451,7 @@ function detectOneTimeItems(state) {
     String(qAnchor.report_date || '').startsWith('2026-03')
     || (String(qAnchor.fp) === 'Q1' && Number(qAnchor.fy) === 2026)
   );
-  const warnerSignal = /warner\s*bros|wbd.*termination|termination\s*fee.*warner/i.test(combined)
+  const warnerSignal = /warner\s*bros|wbd.*termination|termination\s*fee|shareholder\s*letter/i.test(combined)
     || (company.includes('netflix') && isQ12026);
   if (warnerSignal) {
     flags.push({
@@ -553,21 +557,126 @@ function getAnnualAnchorMetrics(state) {
   };
 }
 
-function formatQuarterlyMetric(metric, kind) {
+function formatAnchoredMetricValue(metric, kind) {
   if (!metric || metric.value === null || metric.value === undefined) return 'N/A';
-  const period = metric.period_label || metric.reporting_period || 'quarterly anchor';
   const flag = metric.one_time_flag ? ` ⚠ ${metric.one_time_flag}` : '';
-  if (kind === 'pct' || metric.unit === 'ratio') return `${fmtPct(metric.value)} (${period})${flag}`;
-  if (kind === 'eps' || metric.unit === 'USD/shares') return `${fmtEps(metric.value)} (${period})${flag}`;
-  return `${fmtUsdValue(metric.value)} (${period})${flag}`;
+  if (kind === 'pct' || metric.unit === 'ratio') return `${fmtPct(metric.value)}${flag}`;
+  if (kind === 'eps' || metric.unit === 'USD/shares') return `${fmtEps(metric.value)}${flag}`;
+  return `${fmtUsdValue(metric.value)}${flag}`;
+}
+
+function metricCitation(metric, fallbackForm, fallbackPeriod) {
+  const src = metric?.source_name || fallbackForm || 'SEC EDGAR';
+  const period = metric?.reporting_period || fallbackPeriod || 'N/A';
+  return `Source: ${src} (${period})`;
+}
+
+function formatQuarterlyMetric(metric, kind) {
+  return formatAnchoredMetricValue(metric, kind);
 }
 
 function formatAnnualMetric(metric, kind) {
-  if (!metric || metric.value === null || metric.value === undefined) return 'N/A';
-  const period = metric.period_label || metric.reporting_period || 'FY2025';
-  if (kind === 'pct' || metric.unit === 'ratio') return `${fmtPct(metric.value)} (${period})`;
-  if (kind === 'eps' || metric.unit === 'USD/shares') return `${fmtEps(metric.value)} (${period})`;
-  return `${fmtUsdValue(metric.value)} (${period})`;
+  return formatAnchoredMetricValue(metric, kind);
+}
+
+function aggregateReportGaps(state) {
+  const gaps = [...(state.normalized?.gaps || [])];
+  const ts = new Date().toISOString();
+  if (state.peer_benchmarks && !state.peer_benchmarks.table_published) {
+    gaps.push({
+      metric: 'peer_benchmarks',
+      reason: 'Peer table withheld — core FY peer metrics incomplete across entities.',
+      source: 'WF_PEER_BENCHMARKS',
+      timestamp: ts,
+    });
+  }
+  const qNa = (state.ratio_dashboard?.quarterly || []).filter((r) => r.value === 'N/A').length;
+  const aNa = (state.ratio_dashboard?.annual || []).flatMap((r) => r.values || []).filter((v) => v === 'N/A').length;
+  if (qNa > 0) gaps.push({ metric: 'quarterly_ratios', reason: `${qNa} quarterly ratio(s) N/A on anchored filing.`, source: 'WF_RATIO_DASHBOARD', timestamp: ts });
+  if (aNa > 0) gaps.push({ metric: 'annual_ratios', reason: `${aNa} annual ratio value(s) N/A.`, source: 'WF_RATIO_DASHBOARD', timestamp: ts });
+  if (!state.research?.market_data?.market_cap_usd) {
+    gaps.push({ metric: 'market_cap', reason: 'Yahoo Finance market cap unavailable.', source: 'WF_RESEARCH_PUBLIC', timestamp: ts });
+  }
+  return gaps;
+}
+
+function unusualQuarterNotes(state) {
+  const flags = state.research?.one_time_items || [];
+  const lines = flags.map((f) => `- ${f.label} (${f.period_label || 'quarterly anchor'}).`);
+  if (flags.some((f) => f.id === 'warner_bros_termination_fee')) {
+    lines.push('- Q1 net income, EPS, and margins reflect the Warner Bros. termination fee disclosed in the 2026 Q1 shareholder letter and 10-Q; exclude this one-time item when assessing operating performance.');
+  }
+  return lines;
+}
+
+function dilutedSharesAtAnchor(facts, anchor) {
+  if (!anchor) return null;
+  const found = tagRowsMerged(facts, 'diluted_shares');
+  const row = found.rows
+    .filter((r) => isInterimForm(r.form) && rowMatchesAnchor(r, anchor))
+    .sort((a, b) => String(a.filed || '').localeCompare(String(b.filed || '')) || String(a.end || '').localeCompare(String(b.end || '')))
+    .at(-1);
+  if (!row) return null;
+  return {
+    value: Number(row.val),
+    source_name: `SEC EDGAR ${found.taxonomy || 'us-gaap'}:${found.tag}`,
+    reporting_period: row.end || anchor.report_date,
+    source_section: row.form || anchor.form,
+    concept: 'weighted_average_diluted',
+  };
+}
+
+function deiSharesOutstanding(deiFacts) {
+  if (!deiFacts?.EntityCommonStockSharesOutstanding) return null;
+  const row = Object.values(deiFacts.EntityCommonStockSharesOutstanding.units || {}).flat()
+    .filter((r) => r && r.val !== undefined)
+    .sort((a, b) => String(a.filed || '').localeCompare(String(b.filed || '')) || String(a.end || '').localeCompare(String(b.end || '')))
+    .at(-1);
+  if (!row) return null;
+  return {
+    value: Number(row.val),
+    source_name: 'SEC DEI:EntityCommonStockSharesOutstanding',
+    reporting_period: row.end || row.filed,
+    concept: 'shares_outstanding',
+  };
+}
+
+function buildLiveMarketData(meta, mergedFacts, deiFacts, qAnchor, ticker) {
+  const price = meta?.regularMarketPrice ?? meta?.previousClose ?? null;
+  const asOfTs = meta?.regularMarketTime ? meta.regularMarketTime * 1000 : Date.now();
+  const asOf = new Date(asOfTs).toISOString();
+  const marketCap = meta?.marketCap != null ? Number(meta.marketCap) : null;
+  const dei = deiSharesOutstanding(deiFacts);
+  const dilutedWa = qAnchor ? dilutedSharesAtAnchor(mergedFacts, qAnchor) : null;
+  const priceNum = price != null ? Number(price) : null;
+  const impliedShares = priceNum && marketCap ? marketCap / priceNum : null;
+  const yahooUrl = ticker ? `https://finance.yahoo.com/quote/${ticker}` : null;
+  return {
+    source_name: 'Yahoo Finance',
+    source_url: yahooUrl,
+    source_date: asOf,
+    ticker,
+    share_price_usd: priceNum,
+    share_price_currency: 'USD',
+    market_cap_usd: marketCap,
+    market_cap_source: 'Yahoo Finance meta.marketCap',
+    shares_outstanding: dei?.value ?? null,
+    shares_outstanding_source: dei?.source_name ?? null,
+    shares_outstanding_as_of: dei?.reporting_period ?? null,
+    shares_outstanding_note: 'Point-in-time shares outstanding (SEC DEI). Not quarterly weighted-average diluted shares.',
+    weighted_avg_diluted_shares: dilutedWa?.value ?? null,
+    weighted_avg_diluted_shares_source: dilutedWa?.source_name ?? null,
+    weighted_avg_diluted_shares_period: dilutedWa?.reporting_period ?? qAnchor?.report_date ?? null,
+    weighted_avg_diluted_shares_note: 'From quarterly filing anchor (weighted-average diluted shares outstanding).',
+    implied_shares_outstanding: impliedShares,
+    implied_shares_note: 'Market-derived: Yahoo market cap ÷ share price. Do not treat as a filing share count.',
+    math_consistent: Boolean(priceNum && marketCap && impliedShares),
+    math_note: priceNum && marketCap
+      ? `Yahoo Finance @ ${asOf}: market cap ${fmtUsdValue(marketCap)}, price ${fmtUsdValue(priceNum)}, implied shares ${impliedShares ? Math.round(impliedShares).toLocaleString('en-US') : 'N/A'}.`
+      : 'Yahoo Finance returned partial quote data.',
+    confidence: priceNum && marketCap ? 'MEDIUM' : 'LOW',
+    fetched_at: new Date().toISOString(),
+  };
 }
 
 function reconcileMarketData(sharePrice, sharesOutstanding, reportedMarketCap) {
@@ -693,35 +802,39 @@ function parseClaudeJson(response) {
 function buildDeterministicInsights(state) {
   const q = getQuarterlyAnchorMetrics(state);
   const period = q.period_label || 'Quarterly anchor';
+  const qForm = state.data_freshness?.quarterly_anchor_form || '10-Q';
+  const qPeriod = q.reporting_period || state.data_freshness?.quarterly_anchor_report_date || 'N/A';
   const issuer = state.entity?.issuer_profile?.description || 'public company';
   const ref8k = state.data_freshness?.recent_8k_form;
   const ref8kDate = state.data_freshness?.recent_8k_filing_date;
   const peerReady = state.peer_benchmarks?.table_published === true;
+  const unusual = unusualQuarterNotes(state);
   return [
     '## Section 4: Three Strategic Insights',
     '',
-    `All figures below use the quarterly financial anchor only (${period}; report period ${q.reporting_period || 'N/A'}).`,
+    `Metric basis: quarterly anchor ${period} (report period ${qPeriod}). GAAP figures from SEC filings unless marked as interpretation.`,
     '',
     '### Insight 1 — Cash-flow quality and reinvestment',
-    `- Revenue: ${formatQuarterlyMetric(q.revenue)}`,
-    `- Operating margin: ${formatQuarterlyMetric(q.operating_margin, 'pct')}`,
-    `- FCF: ${formatQuarterlyMetric(q.free_cash_flow)}`,
-    `- EPS: ${formatQuarterlyMetric(q.eps, 'eps')}`,
-    `- Damodaran take: Sustainable value creation depends on whether growth is backed by reinvestment and cash conversion, not headline revenue alone.`,
+    `- Revenue: ${formatQuarterlyMetric(q.revenue)} — ${metricCitation(q.revenue, qForm, qPeriod)}`,
+    `- Operating margin: ${formatQuarterlyMetric(q.operating_margin, 'pct')} — ${metricCitation(q.operating_margin, qForm, qPeriod)} (computed: operating income ÷ revenue)`,
+    `- FCF: ${formatQuarterlyMetric(q.free_cash_flow)} — ${metricCitation(q.free_cash_flow, qForm, qPeriod)} (computed: operating cash flow − capex)`,
+    `- EPS: ${formatQuarterlyMetric(q.eps, 'eps')} — ${metricCitation(q.eps, qForm, qPeriod)}`,
+    ...(unusual.length ? ['', 'Unusual quarter items:', ...unusual] : []),
+    `- Damodaran take (interpretation): Sustainable value creation depends on whether growth is backed by reinvestment and cash conversion, not headline revenue alone.`,
     `- So-what: ${state.inputs?.exec_type || 'Executive'} should prioritize the metric with the weakest source-backed trend before approving new spend.`,
     '',
     '### Insight 2 — Risk, leverage, and cost of capital',
-    `- Issuer profile: ${issuer}`,
+    `- Issuer profile: ${issuer} [filing classification]`,
     peerReady
-      ? '- Peer benchmark table in Section 3 uses FY2025 annual SEC facts on a consistent basis.'
-      : '- Peer benchmark table withheld until all core FY2025 metrics can be populated consistently.',
-    `- Damodaran take: Risk is not abstract; it shows up in leverage, coverage, and earnings volatility versus peers.`,
-    `- So-what: If leverage or margin trails peers, the strategic plan must explain the path to convergence or justify a premium/discount.`,
+      ? `- Peer context: Section 3 FY${state.peer_benchmarks?.benchmark_fy || 2025} table — filing-backed annual SEC facts.`
+      : '- Peer context: Section 3 withheld — insufficient consistent peer data (see Section 8 gaps).',
+    `- Damodaran take (interpretation): Risk shows up in leverage, coverage, and earnings volatility versus peers.`,
+    `- So-what: If leverage or margin trails peers, the strategic plan must explain convergence or justify a premium/discount.`,
     '',
     '### Insight 3 — Narrative vs filings',
-    `- Quarterly anchor: ${state.data_freshness?.quarterly_anchor_form || 'N/A'} (${state.data_freshness?.quarterly_anchor_report_date || 'N/A'})`,
-    ref8k ? `- Recent 8-K reference only (not a financial anchor): ${ref8k} filed ${ref8kDate || 'N/A'}` : '- No recent 8-K on file.',
-    `- Damodaran take: Markets price expected future cash flows; filings and interim reports test whether the narrative is credible.`,
-    `- So-what: Tie every strategic claim to a filing-backed metric or explicitly mark it N/A.`,
+    `- Quarterly anchor: ${qForm} filed ${state.data_freshness?.quarterly_anchor_filing_date || 'N/A'} (report period ${qPeriod}) [SEC filing]`,
+    ref8k ? `- Recent 8-K (reference only, not financial anchor): ${ref8k} filed ${ref8kDate || 'N/A'}` : '- No recent 8-K on file.',
+    `- Damodaran take (interpretation): Markets price expected future cash flows; interim filings test whether the narrative is credible.`,
+    `- So-what: Tie every strategic claim to a filing-backed metric or mark it as interpretation/N/A.`,
   ].join('\n');
 }
