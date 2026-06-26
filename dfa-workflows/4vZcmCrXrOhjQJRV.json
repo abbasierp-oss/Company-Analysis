@@ -1,0 +1,290 @@
+{
+  "updatedAt": "2026-06-24T11:57:18.309Z",
+  "createdAt": "2026-06-24T10:32:25.488Z",
+  "id": "4vZcmCrXrOhjQJRV",
+  "name": "DFA - WF_MAIN Public Company Phase 1",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "dfa_webhook",
+      "name": "Run Intake Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "damodaran-analyst/run",
+        "responseMode": "responseNode",
+        "options": {},
+        "authentication": "headerAuth"
+      },
+      "webhookId": "16a1f09b-ac3c-4203-a809-0f1056c80f73",
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "Ht7gv2vhRhJ1PlrP",
+          "name": "DFA Webhook Header Auth"
+        }
+      }
+    },
+    {
+      "id": "dfa_init",
+      "name": "Initialize Run State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const payload = items[0]?.json?.body || items[0]?.json || {};\nconst required = ['company_name', 'exec_type', 'industry'];\nconst missing = required.filter((field) => !payload[field]);\nconst runId = payload.run_id || `dfa_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;\nconst now = new Date().toISOString();\nconst state = {\n  run_id: runId,\n  created_at: now,\n  updated_at: now,\n  inputs: {\n    company_name: payload.company_name || '',\n    exec_type: payload.exec_type || '',\n    industry: payload.industry || '',\n    expert_pref: payload.expert_pref || 'pick_for_me',\n    report_purpose: payload.report_purpose || 'sales_pitch',\n    delivery_targets: payload.delivery_targets || [],\n    human_review: payload.human_review ?? false,\n    advanced_context: payload.advanced_context || {}\n  },\n  entity: null,\n  research: { financials: {}, peers: [], news_events: [], market_data: {} },\n  normalized: { periods: [], metrics: {}, gaps: [], reliability_map: {}, formulas: {} },\n  sections: {},\n  delivery: { status: missing.length ? 'clarification_required' : 'running' },\n  audit_log: [{ timestamp: now, event_type: 'run_initialized', status: missing.length ? 'WARN' : 'OK', message: missing.length ? `Missing fields: ${missing.join(', ')}` : 'Run initialized' }]\n};\nreturn [{ json: { state, missing, proceed: missing.length === 0 } }];"
+      }
+    },
+    {
+      "id": "dfa_sec_search",
+      "name": "SEC Entity Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        520,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.sec.gov/files/company_tickers.json",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "DamodaranAnalystSystem/1.0 contact-configured-in-n8n"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "dfa_resolve",
+      "name": "Resolve Entity",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const init = $('Initialize Run State').first().json;\nconst state = init.state;\nconst directory = items[0]?.json || {};\nconst rows = Array.isArray(directory) ? directory : Object.values(directory);\nconst normalize = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');\nconst inputName = state.inputs.company_name || '';\nconst inputTicker = state.inputs.advanced_context?.ticker || state.inputs.ticker || '';\nconst inputNorm = normalize(inputName);\nconst tickerNorm = normalize(inputTicker);\nfunction score(row) {\n  const title = row.title || row.name || '';\n  const ticker = row.ticker || '';\n  const titleNorm = normalize(title);\n  const tickerValue = normalize(ticker);\n  let points = 0;\n  if (tickerNorm && tickerValue === tickerNorm) points += 100;\n  if (titleNorm === inputNorm) points += 90;\n  if (titleNorm.startsWith(inputNorm)) points += 70;\n  if (titleNorm.includes(inputNorm)) points += 40;\n  if (inputNorm.includes(titleNorm) && titleNorm.length > 3) points += 20;\n  if (/\\binc\\.?$/i.test(title)) points += 5;\n  return points;\n}\nconst ranked = rows\n  .filter((row) => row && (row.title || row.name) && (row.cik_str || row.cik))\n  .map((row) => ({ row, score: score(row) }))\n  .filter((entry) => entry.score > 0)\n  .sort((a, b) => b.score - a.score);\nconst best = ranked[0]?.row || null;\nconst rawCik = best?.cik_str || best?.cik || null;\nconst cik = rawCik ? String(rawCik).replace(/\\D/g, '').padStart(10, '0') : null;\nconst entityName = best?.title || best?.name || state.inputs.company_name;\nstate.entity = {\n  legal_name: entityName,\n  ticker: best?.ticker || null,\n  cik,\n  exchange: null,\n  fiscal_year_end: null,\n  reporting_currency: 'USD',\n  is_public: Boolean(cik),\n  confidence: cik && ranked[0].score >= 70 ? 'HIGH' : (cik ? 'MEDIUM' : 'LOW'),\n  sources: [{ source_name: 'SEC Company Tickers Directory', source_url: 'https://www.sec.gov/files/company_tickers.json', source_date: new Date().toISOString(), confidence: cik && ranked[0].score >= 70 ? 'HIGH' : (cik ? 'MEDIUM' : 'LOW') }]\n};\nstate.audit_log.push({ timestamp: new Date().toISOString(), event_type: 'entity_resolution', status: cik ? 'OK' : 'WARN', message: cik ? `Resolved ${entityName} (${state.entity.ticker || 'no ticker'}) CIK ${cik}` : 'No CIK found; public-company Phase 1 cannot fetch XBRL facts.' });\nreturn [{ json: { state, entity: state.entity, company_facts_url: cik ? `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json` : 'https://www.sec.gov/files/company_tickers.json' } }];"
+      }
+    },
+    {
+      "id": "dfa_company_facts",
+      "name": "SEC Company Facts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1040,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.company_facts_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "DamodaranAnalystSystem/1.0 contact-configured-in-n8n"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "dfa_snapshot",
+      "name": "Normalize And Build Section 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const resolved = $('Resolve Entity').first().json;\nconst state = resolved.state;\nconst factsResponse = items[0]?.json || {};\nconst usGaap = factsResponse?.facts?.['us-gaap'] || {};\nconst sourceUrl = resolved.company_facts_url;\nconst now = new Date().toISOString();\n\nfunction factCandidates(names) {\n  for (const name of names) {\n    const fact = usGaap[name];\n    if (!fact?.units) continue;\n    const units = fact.units.USD || fact.units.shares || fact.units['USD/shares'] || Object.values(fact.units)[0] || [];\n    if (Array.isArray(units) && units.length) return { tag: name, units };\n  }\n  return null;\n}\nfunction annualSeries(names, unit = 'USD') {\n  const candidate = factCandidates(names);\n  if (!candidate) return [];\n  const annualRows = candidate.units.filter((row) => row.val !== undefined && row.form === '10-K');\n  const byEnd = annualRows.reduce((map, row) => {\n    const key = row.end || `${row.fy}-${row.fp}-${row.frame || ''}`;\n    const existing = map.get(key);\n    if (!existing || String(row.filed || '') > String(existing.filed || '')) map.set(key, row);\n    return map;\n  }, new Map());\n  return Array.from(byEnd.values())\n    .map((row) => ({\n      value: row.val,\n      unit,\n      period: row.frame || (row.fy ? `FY${row.fy}` : row.end),\n      fiscal_label: row.fp || 'FY',\n      source_name: `SEC EDGAR Company Facts:${candidate.tag}`,\n      source_url: sourceUrl,\n      source_date: row.filed || now,\n      source_section: row.form || 'companyfacts',\n      confidence: 'HIGH',\n      notes: row.end || row.frame || ''\n    }))\n    .sort((a, b) => String(a.notes || a.period).localeCompare(String(b.notes || b.period)))\n    .slice(-5);\n}\nfunction latest(series) { return series[series.length - 1] || null; }\nfunction na(metric, reason) {\n  state.normalized.gaps.push({ metric, reason, source: 'normalizer', timestamp: now });\n  return { value: 'N/A', unit: '', period: 'latest', source_name: 'N/A', source_url: '', source_date: now, confidence: 'N/A', notes: reason };\n}\nfunction sourceCell(v) {\n  if (!v || v.value === 'N/A') return `N/A (${v?.notes || 'not available'})`;\n  const display = typeof v.value === 'number' ? Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(v.value) : v.value;\n  return `${display} ${v.unit || ''} [${v.source_name}, ${v.source_date}]`;\n}\nconst metrics = {\n  revenue: annualSeries(['RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet']),\n  operating_income: annualSeries(['OperatingIncomeLoss', 'IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest']),\n  net_income: annualSeries(['NetIncomeLoss', 'ProfitLoss']),\n  operating_cash_flow: annualSeries(['NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations']),\n  capex: annualSeries(['PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets']),\n  long_term_debt: annualSeries(['LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent', 'LongTermDebtAndFinanceLeaseObligationsCurrent']),\n  diluted_eps: annualSeries(['EarningsPerShareDiluted'], 'USD/share'),\n  diluted_shares: annualSeries(['WeightedAverageNumberOfDilutedSharesOutstanding', 'WeightedAverageNumberOfSharesOutstandingDiluted'], 'shares')\n};\nstate.normalized.metrics = metrics;\nstate.normalized.periods = [...new Set(Object.values(metrics).flat().map((m) => m.period))].sort();\nstate.normalized.formulas = {\n  fcf: 'Free cash flow = operating cash flow - capital expenditures',\n  operating_margin: 'Operating margin = operating income / revenue'\n};\nstate.normalized.reliability_map = { public_company_xbrl: state.entity?.cik ? 'HIGH' : 'LOW' };\nconst latestRevenue = latest(metrics.revenue) || na('revenue', 'No SEC XBRL revenue tag found.');\nconst latestOpIncome = latest(metrics.operating_income) || na('operating_income', 'No SEC XBRL operating income tag found.');\nconst latestNetIncome = latest(metrics.net_income) || na('net_income', 'No SEC XBRL net income tag found.');\nconst latestOcf = latest(metrics.operating_cash_flow) || na('operating_cash_flow', 'No SEC XBRL operating cash flow tag found.');\nconst latestCapex = latest(metrics.capex) || na('capex', 'No SEC XBRL capex tag found.');\nconst latestDebt = latest(metrics.long_term_debt) || na('long_term_debt', 'No SEC XBRL long-term debt tag found.');\nconst latestEps = latest(metrics.diluted_eps) || na('diluted_eps', 'No SEC XBRL diluted EPS tag found.');\nlet fcf = na('free_cash_flow', 'Requires both operating cash flow and capex.');\nif (typeof latestOcf.value === 'number' && typeof latestCapex.value === 'number') {\n  fcf = { ...latestOcf, value: latestOcf.value - latestCapex.value, source_name: `${latestOcf.source_name} + ${latestCapex.source_name}`, notes: 'Computed as operating cash flow minus capex.' };\n}\nlet opMargin = na('operating_margin', 'Requires both revenue and operating income.');\nif (typeof latestRevenue.value === 'number' && typeof latestOpIncome.value === 'number' && latestRevenue.value !== 0) {\n  opMargin = { ...latestOpIncome, value: latestOpIncome.value / latestRevenue.value, unit: 'ratio', source_name: `${latestOpIncome.source_name} + ${latestRevenue.source_name}`, notes: 'Computed as operating income divided by revenue.' };\n}\nconst markdown = `## Section 2: Financial Snapshot\\n\\n| Metric | Latest Available Value | Source | Reliability | Notes |\\n|---|---:|---|---|---|\\n| Revenue | ${sourceCell(latestRevenue)} | SEC Company Facts | ${latestRevenue.confidence} | Latest annual filing value |\\n| Operating Income | ${sourceCell(latestOpIncome)} | SEC Company Facts | ${latestOpIncome.confidence} | GAAP where available |\\n| Operating Margin | ${typeof opMargin.value === 'number' ? (opMargin.value * 100).toFixed(1) + '%' : sourceCell(opMargin)} | Computed from sourced values | ${opMargin.confidence} | ${opMargin.notes} |\\n| Net Income | ${sourceCell(latestNetIncome)} | SEC Company Facts | ${latestNetIncome.confidence} | Latest annual filing value |\\n| Operating Cash Flow | ${sourceCell(latestOcf)} | SEC Company Facts | ${latestOcf.confidence} | Latest annual filing value |\\n| Capex | ${sourceCell(latestCapex)} | SEC Company Facts | ${latestCapex.confidence} | Latest annual filing value |\\n| Free Cash Flow | ${sourceCell(fcf)} | Computed from sourced values | ${fcf.confidence} | ${fcf.notes} |\\n| Long-Term Debt | ${sourceCell(latestDebt)} | SEC Company Facts | ${latestDebt.confidence} | Latest annual filing value |\\n| Diluted EPS | ${sourceCell(latestEps)} | SEC Company Facts | ${latestEps.confidence} | Latest annual filing value |\\n\\n### Data Gaps\\n${state.normalized.gaps.length ? state.normalized.gaps.map((gap) => `- ${gap.metric}: ${gap.reason}`).join('\\n') : '- None detected in Phase 1 metrics.'}`;\nstate.sections.s2_snapshot = markdown;\nstate.delivery.status = 'phase_1_completed';\nstate.audit_log.push({ timestamp: now, event_type: 'section_generated', status: 'OK', message: 'Section 2 snapshot generated from normalized SEC data only.' });\nreturn [{ json: { run_id: state.run_id, status: state.delivery.status, entity: state.entity, normalized: state.normalized, section_2_snapshot: markdown, state } }];"
+      }
+    },
+    {
+      "id": "dfa_respond",
+      "name": "Return Report JSON",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1560,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Run Intake Webhook": {
+      "main": [
+        [
+          {
+            "node": "Initialize Run State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initialize Run State": {
+      "main": [
+        [
+          {
+            "node": "SEC Entity Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SEC Entity Search": {
+      "main": [
+        [
+          {
+            "node": "Resolve Entity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Entity": {
+      "main": [
+        [
+          {
+            "node": "SEC Company Facts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SEC Company Facts": {
+      "main": [
+        [
+          {
+            "node": "Normalize And Build Section 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize And Build Section 2": {
+      "main": [
+        [
+          {
+            "node": "Return Report JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Karachi",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "executionTimeout": 300
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "6c165a09-6cc6-417a-9c0c-5e3ede6ab675",
+  "activeVersionId": null,
+  "versionCounter": 7,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-24T10:32:25.490Z",
+      "createdAt": "2026-06-24T10:32:25.490Z",
+      "role": "workflow:owner",
+      "workflowId": "4vZcmCrXrOhjQJRV",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-06-24T11:25:52.602Z",
+      "createdAt": "2026-06-24T11:25:52.602Z",
+      "id": "PvqNmKlzG0X72TtP",
+      "name": "DFA Analyst System"
+    }
+  ],
+  "activeVersion": null
+}

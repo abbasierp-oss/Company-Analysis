@@ -1,0 +1,1001 @@
+{
+  "updatedAt": "2026-06-24T11:55:29.491Z",
+  "createdAt": "2026-06-24T11:25:39.744Z",
+  "id": "kzIaomSZNTdwUTS2",
+  "name": "DFA - Founder Demo Form to Gamma Deck",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Damodaran-Style Gamma Deck Builder",
+        "formDescription": "Create a 3-5 slide Gamma-ready financial snapshot, peer benchmark, strategic insight, and executive proposal outline. Uses free/public sources only: SEC, company IR/public pages, and public search discovery.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Company name",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Ticker symbol if public"
+            },
+            {
+              "fieldLabel": "Executive",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "CFO"
+                  },
+                  {
+                    "option": "CEO"
+                  },
+                  {
+                    "option": "COO"
+                  },
+                  {
+                    "option": "CIO"
+                  },
+                  {
+                    "option": "CDO"
+                  },
+                  {
+                    "option": "CISO"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Industry",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Industry expert to blend",
+              "placeholder": "Type a name or write pick for me"
+            },
+            {
+              "fieldLabel": "Slide count",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "3"
+                  },
+                  {
+                    "option": "4"
+                  },
+                  {
+                    "option": "5"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Founder source URLs or notes",
+              "fieldType": "textarea",
+              "placeholder": "Optional: paste investor relations page, annual report URL, known peers, service angle, or company notes."
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {
+          "appendAttribution": false,
+          "respondWithOptions": {
+            "values": {
+              "formSubmittedText": "Gamma deck outline generated. Review the workflow output."
+            }
+          }
+        }
+      },
+      "id": "form_trigger",
+      "name": "Founder Input Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "c8ebe559-6880-4e72-8bcf-5bdf56d89a3b"
+    },
+    {
+      "parameters": {
+        "jsCode": "const form = items[0]?.json || {};\nfunction pick(...names) {\n  for (const name of names) {\n    if (form[name] !== undefined && form[name] !== '') return form[name];\n  }\n  return '';\n}\nconst companyName = pick('Company name', 'company_name', 'field-0');\nconst ticker = pick('Ticker symbol if public', 'ticker', 'field-1');\nconst execType = pick('Executive', 'exec_type', 'field-2') || 'CFO';\nconst industry = pick('Industry', 'industry', 'field-3');\nconst expertRaw = pick('Industry expert to blend', 'expert_pref', 'field-4') || 'pick for me';\nconst slideCount = Number(pick('Slide count', 'slide_count', 'field-5') || 4);\nconst notes = pick('Founder source URLs or notes', 'source_notes', 'field-6');\nconst expertMap = {\n  'media': { name: 'Ben Thompson', reason: 'best for aggregation theory, distribution power, and platform economics' },\n  'entertainment': { name: 'Ben Thompson', reason: 'best for media/platform economics' },\n  'gaming': { name: 'Matthew Ball', reason: 'best for gaming platforms, engagement, and interactive media' },\n  'banking': { name: 'Jamie Dimon', reason: 'best for balance sheet discipline and credit cycles' },\n  'retail': { name: 'Jan Kniffen', reason: 'best for retail operations and inventory economics' },\n  'manufacturing': { name: 'Henry Kravis', reason: 'best for operational leverage and value creation' },\n  'healthcare': { name: 'Andy Slavitt', reason: 'best for reimbursement, regulation, and healthcare incentives' },\n  'technology': { name: 'Bill Gurley', reason: 'best for software unit economics and growth discipline' },\n  'saas': { name: 'Bill Gurley', reason: 'best for SaaS unit economics and Rule of 40 thinking' }\n};\nconst key = Object.keys(expertMap).find((k) => industry.toLowerCase().includes(k));\nconst expert = expertRaw.toLowerCase().includes('pick') ? (expertMap[key] || { name: 'Aswath Damodaran plus a sector specialist lens', reason: 'default when no clear industry expert mapping exists' }) : { name: expertRaw, reason: 'selected by founder' };\nconst now = new Date().toISOString();\nconst state = {\n  run_id: `dfa_demo_${Date.now()}`,\n  created_at: now,\n  updated_at: now,\n  inputs: {\n    company_name: companyName,\n    ticker,\n    exec_type: execType,\n    industry,\n    expert_pref: expertRaw,\n    expert_resolved: expert,\n    slide_count: [3, 4, 5].includes(slideCount) ? slideCount : 4,\n    deck_type: `gamma_${[3, 4, 5].includes(slideCount) ? slideCount : 4}_slide_demo`,\n    advanced_context: { source_notes: notes }\n  },\n  entity: null,\n  research: {},\n  normalized: { periods: [], metrics: {}, gaps: [], reliability_map: {}, formulas: {} },\n  sections: {},\n  gamma_deck: null,\n  audit_log: [{ timestamp: now, workflow_name: 'Founder Demo Form', status: 'OK', message: 'Form input captured.' }]\n};\nreturn [{ json: { state, companyName, ticker } }];"
+      },
+      "id": "init",
+      "name": "Normalize Form Inputs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.sec.gov/files/company_tickers.json",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "DamodaranAnalystSystem/1.0 contact-configured-in-n8n"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "sec_directory",
+      "name": "Fetch SEC Company Directory",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        528,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const init = $('Normalize Form Inputs').first().json;\nconst state = init.state;\nconst directory = items[0]?.json || {};\nconst rows = Array.isArray(directory) ? directory : Object.values(directory);\nconst normalize = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');\nconst inputNorm = normalize(state.inputs.company_name);\nconst tickerNorm = normalize(state.inputs.ticker);\nfunction score(row) {\n  const title = row.title || row.name || '';\n  const ticker = row.ticker || '';\n  const titleNorm = normalize(title);\n  const tickerValue = normalize(ticker);\n  let points = 0;\n  if (tickerNorm && tickerValue === tickerNorm) points += 100;\n  if (titleNorm === inputNorm) points += 90;\n  if (titleNorm.startsWith(inputNorm)) points += 70;\n  if (titleNorm.includes(inputNorm)) points += 40;\n  return points;\n}\nconst ranked = rows.filter((row) => row && (row.title || row.name) && (row.cik_str || row.cik)).map((row) => ({ row, score: score(row) })).filter((entry) => entry.score > 0).sort((a, b) => b.score - a.score);\nconst best = ranked[0]?.row || null;\nconst rawCik = best?.cik_str || best?.cik || null;\nconst cik = rawCik ? String(rawCik).replace(/\\D/g, '').padStart(10, '0') : null;\nstate.entity = {\n  legal_name: best?.title || state.inputs.company_name,\n  ticker: best?.ticker || state.inputs.ticker || null,\n  cik,\n  exchange: null,\n  fiscal_year_end: null,\n  reporting_currency: 'USD',\n  is_public: Boolean(cik),\n  confidence: cik && ranked[0].score >= 70 ? 'HIGH' : (cik ? 'MEDIUM' : 'LOW'),\n  sources: [{ source_name: 'SEC Company Tickers Directory', source_url: 'https://www.sec.gov/files/company_tickers.json', source_date: new Date().toISOString(), confidence: cik ? 'HIGH' : 'LOW' }]\n};\nstate.audit_log.push({ timestamp: new Date().toISOString(), workflow_name: 'Entity Resolution', status: cik ? 'OK' : 'WARN', message: cik ? `Resolved public issuer ${state.entity.legal_name}.` : 'No SEC CIK found; workflow will use public web discovery only.' });\nreturn [{ json: { state, cik, company_facts_url: cik ? `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json` : 'https://www.sec.gov/files/company_tickers.json', submissions_url: cik ? `https://data.sec.gov/submissions/CIK${cik}.json` : 'https://www.sec.gov/files/company_tickers.json' } }];"
+      },
+      "id": "resolve",
+      "name": "Resolve SEC Entity",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.company_facts_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "DamodaranAnalystSystem/1.0 contact-configured-in-n8n"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "company_facts",
+      "name": "Fetch SEC Company Facts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1040,
+        -96
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Resolve SEC Entity').first().json.submissions_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "DamodaranAnalystSystem/1.0 contact-configured-in-n8n"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "submissions",
+      "name": "Fetch SEC Submissions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1312,
+        -96
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://google.serper.dev/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ q: $('Normalize Form Inputs').first().json.state.inputs.company_name + ' investor relations annual report earnings release transcript restructuring acquisition executive changes', num: 10 }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "serper",
+      "name": "Search Public Sources With Serper",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1568,
+        -96
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "2JT19Mz8usFvinDy",
+          "name": "DFA Serper API Key"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const resolved = $('Resolve SEC Entity').first().json;\nconst state = resolved.state;\nconst facts = $('Fetch SEC Company Facts').first().json || {};\nconst submissions = $('Fetch SEC Submissions').first().json || {};\nconst serper = $('Search Public Sources With Serper').first().json || {};\nconst now = new Date().toISOString();\nconst usGaap = facts?.facts?.['us-gaap'] || {};\nfunction addGap(metric, reason) {\n  if (!state.normalized.gaps.some((gap) => gap.metric === metric && gap.reason === reason)) state.normalized.gaps.push({ metric, reason, source: 'Demo Normalizer', timestamp: now });\n}\nfunction factCandidates(names) {\n  for (const name of names) {\n    const fact = usGaap[name];\n    if (!fact?.units) continue;\n    const units = fact.units.USD || fact.units.shares || fact.units['USD/shares'] || Object.values(fact.units)[0] || [];\n    if (Array.isArray(units) && units.length) return { tag: name, units };\n  }\n  return null;\n}\nfunction annual(metric, names, unit = 'USD') {\n  const candidate = factCandidates(names);\n  if (!candidate) { addGap(metric, `No supported SEC XBRL tag found. Tried ${names.join(', ')}.`); return []; }\n  const byEnd = candidate.units.filter((row) => row.val !== undefined && row.form === '10-K').reduce((map, row) => {\n    const key = row.end || `${row.fy}-${row.fp}-${row.frame || ''}`;\n    const existing = map.get(key);\n    if (!existing || String(row.filed || '') > String(existing.filed || '')) map.set(key, row);\n    return map;\n  }, new Map());\n  const out = Array.from(byEnd.values()).map((row) => ({ value: row.val, unit, period: row.frame || (row.fy ? `FY${row.fy}` : row.end), fiscal_label: row.fp || 'FY', source_name: `SEC EDGAR Company Facts:${candidate.tag}`, source_url: resolved.company_facts_url, source_date: row.filed || now, source_section: row.form || 'companyfacts', confidence: 'HIGH', notes: row.end || '', is_estimate: false })).sort((a, b) => String(a.notes).localeCompare(String(b.notes))).slice(-5);\n  if (!out.length) addGap(metric, `SEC tag ${candidate.tag} exists but no annual 10-K values were found.`);\n  return out;\n}\nfunction latest(series) { return series[series.length - 1] || null; }\nfunction computed(value, unit, sources, notes) { return { value, unit, period: sources[0]?.period || 'latest', fiscal_label: sources[0]?.fiscal_label || '', source_name: sources.map((s) => s.source_name).join(' + '), source_url: sources.map((s) => s.source_url).join(' | '), source_date: sources.map((s) => s.source_date).sort().slice(-1)[0] || now, source_section: 'computed', confidence: sources.every((s) => s.confidence === 'HIGH') ? 'HIGH' : 'MEDIUM', notes, is_estimate: false }; }\nconst metrics = {\n  revenue: annual('revenue', ['RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet']),\n  gross_profit: annual('gross_profit', ['GrossProfit']),\n  operating_income: annual('operating_income', ['OperatingIncomeLoss']),\n  net_income: annual('net_income', ['NetIncomeLoss', 'ProfitLoss']),\n  operating_cash_flow: annual('operating_cash_flow', ['NetCashProvidedByUsedInOperatingActivities']),\n  capex: annual('capex', ['PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets']),\n  long_term_debt: annual('long_term_debt', ['LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent']),\n  diluted_eps: annual('diluted_eps', ['EarningsPerShareDiluted'], 'USD/share'),\n  current_assets: annual('current_assets', ['AssetsCurrent']),\n  current_liabilities: annual('current_liabilities', ['LiabilitiesCurrent'])\n};\nconst r = latest(metrics.revenue), oi = latest(metrics.operating_income), ni = latest(metrics.net_income), gp = latest(metrics.gross_profit), ocf = latest(metrics.operating_cash_flow), capex = latest(metrics.capex), ca = latest(metrics.current_assets), cl = latest(metrics.current_liabilities);\nif (ocf && capex) metrics.free_cash_flow = [computed(ocf.value - capex.value, 'USD', [ocf, capex], 'Cash from operations minus capex.')]; else addGap('free_cash_flow', 'Requires cash from operations and capex.');\nif (r && oi && r.value) metrics.operating_margin = [computed(oi.value / r.value, 'ratio', [oi, r], 'Operating income divided by revenue.')]; else addGap('operating_margin', 'Requires revenue and operating income.');\nif (r && ni && r.value) metrics.net_margin = [computed(ni.value / r.value, 'ratio', [ni, r], 'Net income divided by revenue.')]; else addGap('net_margin', 'Requires revenue and net income.');\nif (r && gp && r.value) metrics.gross_margin = [computed(gp.value / r.value, 'ratio', [gp, r], 'Gross profit divided by revenue.')]; else addGap('gross_margin', 'Requires revenue and gross profit.');\nif (ca && cl && cl.value) metrics.current_ratio = [computed(ca.value / cl.value, 'ratio', [ca, cl], 'Current assets divided by current liabilities.')]; else addGap('current_ratio', 'Requires current assets and current liabilities.');\nstate.normalized.metrics = metrics;\nstate.normalized.periods = [...new Set(Object.values(metrics).flat().map((m) => m.period))].sort();\nstate.normalized.formulas = { fcf: 'Cash from operations - capex', operating_margin: 'Operating income / revenue', net_margin: 'Net income / revenue', gross_margin: 'Gross profit / revenue', current_ratio: 'Current assets / current liabilities' };\nstate.normalized.reliability_map = { public_company_xbrl: Object.keys(usGaap).length ? 'HIGH' : 'LOW', public_search: serper.organic?.length ? 'MEDIUM' : 'LOW' };\nstate.research = {\n  filings: { recent: (submissions.filings?.recent?.form || []).map((form, index) => ({ form, filing_date: submissions.filings.recent.filingDate?.[index], report_date: submissions.filings.recent.reportDate?.[index], accession_number: submissions.filings.recent.accessionNumber?.[index] })).filter((f) => ['10-K', '10-Q', '8-K'].includes(f.form)).slice(0, 15) },\n  public_search_results: (serper.organic || []).slice(0, 10).map((item) => ({ title: item.title, snippet: item.snippet, link: item.link, source_name: 'Serper public search discovery', confidence: 'MEDIUM' })),\n  source_policy: 'Free/public sources only. SEC and company/public pages are authoritative. Serper is discovery only. No paid financial APIs.'\n};\nstate.sections.s2_snapshot = 'Internal snapshot generated from SEC XBRL. Final output is Gamma deck, not full report.';\nstate.audit_log.push({ timestamp: now, workflow_name: 'Demo Normalizer', status: 'OK', message: `Built analysis pack with ${Object.keys(metrics).length} metric groups and ${state.normalized.gaps.length} gaps.` });\nreturn [{ json: { state } }];"
+      },
+      "id": "normalize",
+      "name": "Build Analysis Pack",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1808,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 5000, temperature: 0.45, system: 'You are an AI financial analyst who thinks like Aswath Damodaran and writes concise Gamma AI presentation outlines. Evidence-first, skeptical, transparent. Never fabricate numbers. If missing, write N/A and explain. Do not use templating placeholders or curly-brace variables in the final deck content.', messages: [{ role: 'user', content: 'Create a founder-presentable Gamma AI deck outline with ' + $json.state.inputs.slide_count + ' slides. The deck must condense these required internal deliverables: company and source pack, financial snapshot, peer comparison, three strategic insights, ratio dashboard, executive proposal, read-between-lines signals, assumptions/data gaps, and insight-to-value selling ideas. Return valid JSON only with keys gamma_markdown, slides_json, missing_data_notes, suggested_gamma_theme. Each slide must include title, subtitle, concise bullets, speaker notes, suggested visual, and source notes. Use only the provided data. No paid APIs. No invented numbers. INPUT_JSON: ' + JSON.stringify($json.state).slice(0, 120000) }] }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "gamma_claude",
+      "name": "Claude Gamma Deck Writer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2080,
+        -96
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "higk8M4c3hFtCG0D",
+          "name": "DFA Claude API Key"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const state = $('Build Analysis Pack').first().json.state;\nconst response = $('Claude Gamma Deck Writer').first().json || {};\nfunction responseText(json) { return (json.content || []).map((part) => part.text || '').join('\\n').trim() || JSON.stringify(json); }\nfunction parseJsonish(text) {\n  try { return JSON.parse(text); } catch (e) {}\n  const match = text.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { return JSON.parse(match[0]); } catch (e) {} }\n  return { gamma_markdown: text, slides_json: [], missing_data_notes: ['Claude output was not strict JSON.'], suggested_gamma_theme: 'Clean executive finance theme' };\n}\nconst parsed = parseJsonish(responseText(response));\nstate.gamma_deck = { status: parsed.gamma_markdown ? 'ready' : 'warn', generated_at: new Date().toISOString(), gamma_markdown: parsed.gamma_markdown || '', slides_json: parsed.slides_json || [], missing_data_notes: parsed.missing_data_notes || [], suggested_gamma_theme: parsed.suggested_gamma_theme || 'Clean executive finance theme' };\nconst preview = (state.gamma_deck.gamma_markdown || '').slice(0, 5000);\nreturn [{ json: { formSubmittedText: `Gamma-ready deck generated for ${state.entity?.legal_name || state.inputs.company_name}. Open this workflow execution in n8n and copy the gamma_markdown field into Gamma AI. Preview:\\n\\n${preview.slice(0, 2500)}`, company: state.entity, deck_status: state.gamma_deck.status, suggested_gamma_theme: state.gamma_deck.suggested_gamma_theme, gamma_markdown: state.gamma_deck.gamma_markdown, slides_json: state.gamma_deck.slides_json, missing_data_notes: state.gamma_deck.missing_data_notes, preview } }];"
+      },
+      "id": "final",
+      "name": "Present Gamma Deck Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2352,
+        -96
+      ]
+    }
+  ],
+  "connections": {
+    "Founder Input Form": {
+      "main": [
+        [
+          {
+            "node": "Normalize Form Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Form Inputs": {
+      "main": [
+        [
+          {
+            "node": "Fetch SEC Company Directory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch SEC Company Directory": {
+      "main": [
+        [
+          {
+            "node": "Resolve SEC Entity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve SEC Entity": {
+      "main": [
+        [
+          {
+            "node": "Fetch SEC Company Facts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch SEC Company Facts": {
+      "main": [
+        [
+          {
+            "node": "Fetch SEC Submissions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch SEC Submissions": {
+      "main": [
+        [
+          {
+            "node": "Search Public Sources With Serper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Public Sources With Serper": {
+      "main": [
+        [
+          {
+            "node": "Build Analysis Pack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Analysis Pack": {
+      "main": [
+        [
+          {
+            "node": "Claude Gamma Deck Writer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Gamma Deck Writer": {
+      "main": [
+        [
+          {
+            "node": "Present Gamma Deck Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Karachi",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "executionTimeout": 900,
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "51f9976b-06fb-49bf-9e4f-86f9ebf4ebae",
+  "activeVersionId": "51f9976b-06fb-49bf-9e4f-86f9ebf4ebae",
+  "versionCounter": 8,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-24T11:25:39.746Z",
+      "createdAt": "2026-06-24T11:25:39.746Z",
+      "role": "workflow:owner",
+      "workflowId": "kzIaomSZNTdwUTS2",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-06-24T11:25:52.602Z",
+      "createdAt": "2026-06-24T11:25:52.602Z",
+      "id": "PvqNmKlzG0X72TtP",
+      "name": "DFA Analyst System"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-06-24T11:50:58.077Z",
+    "createdAt": "2026-06-24T11:50:58.077Z",
+    "versionId": "51f9976b-06fb-49bf-9e4f-86f9ebf4ebae",
+    "workflowId": "kzIaomSZNTdwUTS2",
+    "nodes": [
+      {
+        "parameters": {
+          "formTitle": "Damodaran-Style Gamma Deck Builder",
+          "formDescription": "Create a 3-5 slide Gamma-ready financial snapshot, peer benchmark, strategic insight, and executive proposal outline. Uses free/public sources only: SEC, company IR/public pages, and public search discovery.",
+          "formFields": {
+            "values": [
+              {
+                "fieldLabel": "Company name",
+                "requiredField": true
+              },
+              {
+                "fieldLabel": "Ticker symbol if public"
+              },
+              {
+                "fieldLabel": "Executive",
+                "fieldType": "dropdown",
+                "fieldOptions": {
+                  "values": [
+                    {
+                      "option": "CFO"
+                    },
+                    {
+                      "option": "CEO"
+                    },
+                    {
+                      "option": "COO"
+                    },
+                    {
+                      "option": "CIO"
+                    },
+                    {
+                      "option": "CDO"
+                    },
+                    {
+                      "option": "CISO"
+                    }
+                  ]
+                },
+                "requiredField": true
+              },
+              {
+                "fieldLabel": "Industry",
+                "requiredField": true
+              },
+              {
+                "fieldLabel": "Industry expert to blend",
+                "placeholder": "Type a name or write pick for me"
+              },
+              {
+                "fieldLabel": "Slide count",
+                "fieldType": "dropdown",
+                "fieldOptions": {
+                  "values": [
+                    {
+                      "option": "3"
+                    },
+                    {
+                      "option": "4"
+                    },
+                    {
+                      "option": "5"
+                    }
+                  ]
+                },
+                "requiredField": true
+              },
+              {
+                "fieldLabel": "Founder source URLs or notes",
+                "fieldType": "textarea",
+                "placeholder": "Optional: paste investor relations page, annual report URL, known peers, service angle, or company notes."
+              }
+            ]
+          },
+          "responseMode": "lastNode",
+          "options": {
+            "appendAttribution": false,
+            "respondWithOptions": {
+              "values": {
+                "formSubmittedText": "Gamma deck outline generated. Review the workflow output."
+              }
+            }
+          }
+        },
+        "id": "form_trigger",
+        "name": "Founder Input Form",
+        "type": "n8n-nodes-base.formTrigger",
+        "typeVersion": 2.6,
+        "position": [
+          0,
+          0
+        ],
+        "webhookId": "c8ebe559-6880-4e72-8bcf-5bdf56d89a3b"
+      },
+      {
+        "parameters": {
+          "jsCode": "const form = items[0]?.json || {};\nfunction pick(...names) {\n  for (const name of names) {\n    if (form[name] !== undefined && form[name] !== '') return form[name];\n  }\n  return '';\n}\nconst companyName = pick('Company name', 'company_name', 'field-0');\nconst ticker = pick('Ticker symbol if public', 'ticker', 'field-1');\nconst execType = pick('Executive', 'exec_type', 'field-2') || 'CFO';\nconst industry = pick('Industry', 'industry', 'field-3');\nconst expertRaw = pick('Industry expert to blend', 'expert_pref', 'field-4') || 'pick for me';\nconst slideCount = Number(pick('Slide count', 'slide_count', 'field-5') || 4);\nconst notes = pick('Founder source URLs or notes', 'source_notes', 'field-6');\nconst expertMap = {\n  'media': { name: 'Ben Thompson', reason: 'best for aggregation theory, distribution power, and platform economics' },\n  'entertainment': { name: 'Ben Thompson', reason: 'best for media/platform economics' },\n  'gaming': { name: 'Matthew Ball', reason: 'best for gaming platforms, engagement, and interactive media' },\n  'banking': { name: 'Jamie Dimon', reason: 'best for balance sheet discipline and credit cycles' },\n  'retail': { name: 'Jan Kniffen', reason: 'best for retail operations and inventory economics' },\n  'manufacturing': { name: 'Henry Kravis', reason: 'best for operational leverage and value creation' },\n  'healthcare': { name: 'Andy Slavitt', reason: 'best for reimbursement, regulation, and healthcare incentives' },\n  'technology': { name: 'Bill Gurley', reason: 'best for software unit economics and growth discipline' },\n  'saas': { name: 'Bill Gurley', reason: 'best for SaaS unit economics and Rule of 40 thinking' }\n};\nconst key = Object.keys(expertMap).find((k) => industry.toLowerCase().includes(k));\nconst expert = expertRaw.toLowerCase().includes('pick') ? (expertMap[key] || { name: 'Aswath Damodaran plus a sector specialist lens', reason: 'default when no clear industry expert mapping exists' }) : { name: expertRaw, reason: 'selected by founder' };\nconst now = new Date().toISOString();\nconst state = {\n  run_id: `dfa_demo_${Date.now()}`,\n  created_at: now,\n  updated_at: now,\n  inputs: {\n    company_name: companyName,\n    ticker,\n    exec_type: execType,\n    industry,\n    expert_pref: expertRaw,\n    expert_resolved: expert,\n    slide_count: [3, 4, 5].includes(slideCount) ? slideCount : 4,\n    deck_type: `gamma_${[3, 4, 5].includes(slideCount) ? slideCount : 4}_slide_demo`,\n    advanced_context: { source_notes: notes }\n  },\n  entity: null,\n  research: {},\n  normalized: { periods: [], metrics: {}, gaps: [], reliability_map: {}, formulas: {} },\n  sections: {},\n  gamma_deck: null,\n  audit_log: [{ timestamp: now, workflow_name: 'Founder Demo Form', status: 'OK', message: 'Form input captured.' }]\n};\nreturn [{ json: { state, companyName, ticker } }];"
+        },
+        "id": "init",
+        "name": "Normalize Form Inputs",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          272,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "url": "https://www.sec.gov/files/company_tickers.json",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "User-Agent",
+                "value": "DamodaranAnalystSystem/1.0 contact-configured-in-n8n"
+              },
+              {
+                "name": "Accept",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "id": "sec_directory",
+        "name": "Fetch SEC Company Directory",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          528,
+          0
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "const init = $('Normalize Form Inputs').first().json;\nconst state = init.state;\nconst directory = items[0]?.json || {};\nconst rows = Array.isArray(directory) ? directory : Object.values(directory);\nconst normalize = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');\nconst inputNorm = normalize(state.inputs.company_name);\nconst tickerNorm = normalize(state.inputs.ticker);\nfunction score(row) {\n  const title = row.title || row.name || '';\n  const ticker = row.ticker || '';\n  const titleNorm = normalize(title);\n  const tickerValue = normalize(ticker);\n  let points = 0;\n  if (tickerNorm && tickerValue === tickerNorm) points += 100;\n  if (titleNorm === inputNorm) points += 90;\n  if (titleNorm.startsWith(inputNorm)) points += 70;\n  if (titleNorm.includes(inputNorm)) points += 40;\n  return points;\n}\nconst ranked = rows.filter((row) => row && (row.title || row.name) && (row.cik_str || row.cik)).map((row) => ({ row, score: score(row) })).filter((entry) => entry.score > 0).sort((a, b) => b.score - a.score);\nconst best = ranked[0]?.row || null;\nconst rawCik = best?.cik_str || best?.cik || null;\nconst cik = rawCik ? String(rawCik).replace(/\\D/g, '').padStart(10, '0') : null;\nstate.entity = {\n  legal_name: best?.title || state.inputs.company_name,\n  ticker: best?.ticker || state.inputs.ticker || null,\n  cik,\n  exchange: null,\n  fiscal_year_end: null,\n  reporting_currency: 'USD',\n  is_public: Boolean(cik),\n  confidence: cik && ranked[0].score >= 70 ? 'HIGH' : (cik ? 'MEDIUM' : 'LOW'),\n  sources: [{ source_name: 'SEC Company Tickers Directory', source_url: 'https://www.sec.gov/files/company_tickers.json', source_date: new Date().toISOString(), confidence: cik ? 'HIGH' : 'LOW' }]\n};\nstate.audit_log.push({ timestamp: new Date().toISOString(), workflow_name: 'Entity Resolution', status: cik ? 'OK' : 'WARN', message: cik ? `Resolved public issuer ${state.entity.legal_name}.` : 'No SEC CIK found; workflow will use public web discovery only.' });\nreturn [{ json: { state, cik, company_facts_url: cik ? `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json` : 'https://www.sec.gov/files/company_tickers.json', submissions_url: cik ? `https://data.sec.gov/submissions/CIK${cik}.json` : 'https://www.sec.gov/files/company_tickers.json' } }];"
+        },
+        "id": "resolve",
+        "name": "Resolve SEC Entity",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          784,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "url": "={{ $json.company_facts_url }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "User-Agent",
+                "value": "DamodaranAnalystSystem/1.0 contact-configured-in-n8n"
+              },
+              {
+                "name": "Accept",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "id": "company_facts",
+        "name": "Fetch SEC Company Facts",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          1040,
+          -96
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "url": "={{ $('Resolve SEC Entity').first().json.submissions_url }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "User-Agent",
+                "value": "DamodaranAnalystSystem/1.0 contact-configured-in-n8n"
+              },
+              {
+                "name": "Accept",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "id": "submissions",
+        "name": "Fetch SEC Submissions",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          1312,
+          -96
+        ],
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true,
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://google.serper.dev/search",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "content-type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ q: $('Normalize Form Inputs').first().json.state.inputs.company_name + ' investor relations annual report earnings release transcript restructuring acquisition executive changes', num: 10 }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "id": "serper",
+        "name": "Search Public Sources With Serper",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          1568,
+          -96
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1500,
+        "alwaysOutputData": true,
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "2JT19Mz8usFvinDy",
+            "name": "DFA Serper API Key"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "const resolved = $('Resolve SEC Entity').first().json;\nconst state = resolved.state;\nconst facts = $('Fetch SEC Company Facts').first().json || {};\nconst submissions = $('Fetch SEC Submissions').first().json || {};\nconst serper = $('Search Public Sources With Serper').first().json || {};\nconst now = new Date().toISOString();\nconst usGaap = facts?.facts?.['us-gaap'] || {};\nfunction addGap(metric, reason) {\n  if (!state.normalized.gaps.some((gap) => gap.metric === metric && gap.reason === reason)) state.normalized.gaps.push({ metric, reason, source: 'Demo Normalizer', timestamp: now });\n}\nfunction factCandidates(names) {\n  for (const name of names) {\n    const fact = usGaap[name];\n    if (!fact?.units) continue;\n    const units = fact.units.USD || fact.units.shares || fact.units['USD/shares'] || Object.values(fact.units)[0] || [];\n    if (Array.isArray(units) && units.length) return { tag: name, units };\n  }\n  return null;\n}\nfunction annual(metric, names, unit = 'USD') {\n  const candidate = factCandidates(names);\n  if (!candidate) { addGap(metric, `No supported SEC XBRL tag found. Tried ${names.join(', ')}.`); return []; }\n  const byEnd = candidate.units.filter((row) => row.val !== undefined && row.form === '10-K').reduce((map, row) => {\n    const key = row.end || `${row.fy}-${row.fp}-${row.frame || ''}`;\n    const existing = map.get(key);\n    if (!existing || String(row.filed || '') > String(existing.filed || '')) map.set(key, row);\n    return map;\n  }, new Map());\n  const out = Array.from(byEnd.values()).map((row) => ({ value: row.val, unit, period: row.frame || (row.fy ? `FY${row.fy}` : row.end), fiscal_label: row.fp || 'FY', source_name: `SEC EDGAR Company Facts:${candidate.tag}`, source_url: resolved.company_facts_url, source_date: row.filed || now, source_section: row.form || 'companyfacts', confidence: 'HIGH', notes: row.end || '', is_estimate: false })).sort((a, b) => String(a.notes).localeCompare(String(b.notes))).slice(-5);\n  if (!out.length) addGap(metric, `SEC tag ${candidate.tag} exists but no annual 10-K values were found.`);\n  return out;\n}\nfunction latest(series) { return series[series.length - 1] || null; }\nfunction computed(value, unit, sources, notes) { return { value, unit, period: sources[0]?.period || 'latest', fiscal_label: sources[0]?.fiscal_label || '', source_name: sources.map((s) => s.source_name).join(' + '), source_url: sources.map((s) => s.source_url).join(' | '), source_date: sources.map((s) => s.source_date).sort().slice(-1)[0] || now, source_section: 'computed', confidence: sources.every((s) => s.confidence === 'HIGH') ? 'HIGH' : 'MEDIUM', notes, is_estimate: false }; }\nconst metrics = {\n  revenue: annual('revenue', ['RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet']),\n  gross_profit: annual('gross_profit', ['GrossProfit']),\n  operating_income: annual('operating_income', ['OperatingIncomeLoss']),\n  net_income: annual('net_income', ['NetIncomeLoss', 'ProfitLoss']),\n  operating_cash_flow: annual('operating_cash_flow', ['NetCashProvidedByUsedInOperatingActivities']),\n  capex: annual('capex', ['PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets']),\n  long_term_debt: annual('long_term_debt', ['LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent']),\n  diluted_eps: annual('diluted_eps', ['EarningsPerShareDiluted'], 'USD/share'),\n  current_assets: annual('current_assets', ['AssetsCurrent']),\n  current_liabilities: annual('current_liabilities', ['LiabilitiesCurrent'])\n};\nconst r = latest(metrics.revenue), oi = latest(metrics.operating_income), ni = latest(metrics.net_income), gp = latest(metrics.gross_profit), ocf = latest(metrics.operating_cash_flow), capex = latest(metrics.capex), ca = latest(metrics.current_assets), cl = latest(metrics.current_liabilities);\nif (ocf && capex) metrics.free_cash_flow = [computed(ocf.value - capex.value, 'USD', [ocf, capex], 'Cash from operations minus capex.')]; else addGap('free_cash_flow', 'Requires cash from operations and capex.');\nif (r && oi && r.value) metrics.operating_margin = [computed(oi.value / r.value, 'ratio', [oi, r], 'Operating income divided by revenue.')]; else addGap('operating_margin', 'Requires revenue and operating income.');\nif (r && ni && r.value) metrics.net_margin = [computed(ni.value / r.value, 'ratio', [ni, r], 'Net income divided by revenue.')]; else addGap('net_margin', 'Requires revenue and net income.');\nif (r && gp && r.value) metrics.gross_margin = [computed(gp.value / r.value, 'ratio', [gp, r], 'Gross profit divided by revenue.')]; else addGap('gross_margin', 'Requires revenue and gross profit.');\nif (ca && cl && cl.value) metrics.current_ratio = [computed(ca.value / cl.value, 'ratio', [ca, cl], 'Current assets divided by current liabilities.')]; else addGap('current_ratio', 'Requires current assets and current liabilities.');\nstate.normalized.metrics = metrics;\nstate.normalized.periods = [...new Set(Object.values(metrics).flat().map((m) => m.period))].sort();\nstate.normalized.formulas = { fcf: 'Cash from operations - capex', operating_margin: 'Operating income / revenue', net_margin: 'Net income / revenue', gross_margin: 'Gross profit / revenue', current_ratio: 'Current assets / current liabilities' };\nstate.normalized.reliability_map = { public_company_xbrl: Object.keys(usGaap).length ? 'HIGH' : 'LOW', public_search: serper.organic?.length ? 'MEDIUM' : 'LOW' };\nstate.research = {\n  filings: { recent: (submissions.filings?.recent?.form || []).map((form, index) => ({ form, filing_date: submissions.filings.recent.filingDate?.[index], report_date: submissions.filings.recent.reportDate?.[index], accession_number: submissions.filings.recent.accessionNumber?.[index] })).filter((f) => ['10-K', '10-Q', '8-K'].includes(f.form)).slice(0, 15) },\n  public_search_results: (serper.organic || []).slice(0, 10).map((item) => ({ title: item.title, snippet: item.snippet, link: item.link, source_name: 'Serper public search discovery', confidence: 'MEDIUM' })),\n  source_policy: 'Free/public sources only. SEC and company/public pages are authoritative. Serper is discovery only. No paid financial APIs.'\n};\nstate.sections.s2_snapshot = 'Internal snapshot generated from SEC XBRL. Final output is Gamma deck, not full report.';\nstate.audit_log.push({ timestamp: now, workflow_name: 'Demo Normalizer', status: 'OK', message: `Built analysis pack with ${Object.keys(metrics).length} metric groups and ${state.normalized.gaps.length} gaps.` });\nreturn [{ json: { state } }];"
+        },
+        "id": "normalize",
+        "name": "Build Analysis Pack",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1808,
+          -96
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.anthropic.com/v1/messages",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "anthropic-version",
+                "value": "2023-06-01"
+              },
+              {
+                "name": "content-type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 5000, temperature: 0.45, system: 'You are an AI financial analyst who thinks like Aswath Damodaran and writes concise Gamma AI presentation outlines. Evidence-first, skeptical, transparent. Never fabricate numbers. If missing, write N/A and explain. Do not use templating placeholders or curly-brace variables in the final deck content.', messages: [{ role: 'user', content: 'Create a founder-presentable Gamma AI deck outline with ' + $json.state.inputs.slide_count + ' slides. The deck must condense these required internal deliverables: company and source pack, financial snapshot, peer comparison, three strategic insights, ratio dashboard, executive proposal, read-between-lines signals, assumptions/data gaps, and insight-to-value selling ideas. Return valid JSON only with keys gamma_markdown, slides_json, missing_data_notes, suggested_gamma_theme. Each slide must include title, subtitle, concise bullets, speaker notes, suggested visual, and source notes. Use only the provided data. No paid APIs. No invented numbers. INPUT_JSON: ' + JSON.stringify($json.state).slice(0, 120000) }] }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "id": "gamma_claude",
+        "name": "Claude Gamma Deck Writer",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          2080,
+          -96
+        ],
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1500,
+        "alwaysOutputData": true,
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "higk8M4c3hFtCG0D",
+            "name": "DFA Claude API Key"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "jsCode": "const state = $('Build Analysis Pack').first().json.state;\nconst response = $('Claude Gamma Deck Writer').first().json || {};\nfunction responseText(json) { return (json.content || []).map((part) => part.text || '').join('\\n').trim() || JSON.stringify(json); }\nfunction parseJsonish(text) {\n  try { return JSON.parse(text); } catch (e) {}\n  const match = text.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { return JSON.parse(match[0]); } catch (e) {} }\n  return { gamma_markdown: text, slides_json: [], missing_data_notes: ['Claude output was not strict JSON.'], suggested_gamma_theme: 'Clean executive finance theme' };\n}\nconst parsed = parseJsonish(responseText(response));\nstate.gamma_deck = { status: parsed.gamma_markdown ? 'ready' : 'warn', generated_at: new Date().toISOString(), gamma_markdown: parsed.gamma_markdown || '', slides_json: parsed.slides_json || [], missing_data_notes: parsed.missing_data_notes || [], suggested_gamma_theme: parsed.suggested_gamma_theme || 'Clean executive finance theme' };\nconst preview = (state.gamma_deck.gamma_markdown || '').slice(0, 5000);\nreturn [{ json: { formSubmittedText: `Gamma-ready deck generated for ${state.entity?.legal_name || state.inputs.company_name}. Open this workflow execution in n8n and copy the gamma_markdown field into Gamma AI. Preview:\\n\\n${preview.slice(0, 2500)}`, company: state.entity, deck_status: state.gamma_deck.status, suggested_gamma_theme: state.gamma_deck.suggested_gamma_theme, gamma_markdown: state.gamma_deck.gamma_markdown, slides_json: state.gamma_deck.slides_json, missing_data_notes: state.gamma_deck.missing_data_notes, preview } }];"
+        },
+        "id": "final",
+        "name": "Present Gamma Deck Result",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2352,
+          -96
+        ]
+      }
+    ],
+    "connections": {
+      "Founder Input Form": {
+        "main": [
+          [
+            {
+              "node": "Normalize Form Inputs",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normalize Form Inputs": {
+        "main": [
+          [
+            {
+              "node": "Fetch SEC Company Directory",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch SEC Company Directory": {
+        "main": [
+          [
+            {
+              "node": "Resolve SEC Entity",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Resolve SEC Entity": {
+        "main": [
+          [
+            {
+              "node": "Fetch SEC Company Facts",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch SEC Company Facts": {
+        "main": [
+          [
+            {
+              "node": "Fetch SEC Submissions",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch SEC Submissions": {
+        "main": [
+          [
+            {
+              "node": "Search Public Sources With Serper",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Search Public Sources With Serper": {
+        "main": [
+          [
+            {
+              "node": "Build Analysis Pack",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Analysis Pack": {
+        "main": [
+          [
+            {
+              "node": "Claude Gamma Deck Writer",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Claude Gamma Deck Writer": {
+        "main": [
+          [
+            {
+              "node": "Present Gamma Deck Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Abdullah  Dilshad",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-24T11:50:58.292Z",
+        "id": 176,
+        "workflowId": "kzIaomSZNTdwUTS2",
+        "versionId": "51f9976b-06fb-49bf-9e4f-86f9ebf4ebae",
+        "event": "activated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      },
+      {
+        "createdAt": "2026-06-24T11:50:58.206Z",
+        "id": 175,
+        "workflowId": "kzIaomSZNTdwUTS2",
+        "versionId": "51f9976b-06fb-49bf-9e4f-86f9ebf4ebae",
+        "event": "deactivated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    ]
+  }
+}
