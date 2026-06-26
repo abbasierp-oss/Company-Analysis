@@ -41,14 +41,14 @@ try {
     source_date: asOf,
     ticker,
     share_price_usd: sharePrice,
-    share_price_currency: meta.currency || 'USD',
+    share_price_currency: 'USD',
     shares_outstanding: sharesOutstanding,
     shares_source: shareInfo?.source || null,
     shares_filed: shareInfo?.filed || null,
     market_cap_usd: marketCap,
     confidence: marketCap ? (shareInfo?.confidence === 'HIGH' ? 'MEDIUM' : 'LOW') : (sharePrice ? 'LOW' : 'N/A'),
     fetched_at: now,
-    adr_note: state.entity?.is_foreign_issuer ? 'Foreign issuer: market cap uses listing price x best available share count.' : null,
+    adr_note: state.entity?.is_foreign_issuer ? 'Foreign issuer: market cap uses listing price x best available share count (USD).' : null,
   };
   state.entity.market_cap_usd = marketCap;
   state.entity.market_cap_as_of = asOf;
@@ -56,22 +56,38 @@ try {
   state.research.market_data = { confidence: 'N/A', error: String(e.message || e), fetched_at: now };
 }
 
-const filings = state.research?.filings?.recent_filings || [];
-const latestFiling = filings[0] || null;
+const anchors = state.research?.filing_anchors || resolveFilingAnchors(
+  state.research?.filings?.recent_filings || [],
+  state.entity?.issuer_profile,
+);
+state.research.filing_anchors = anchors;
+state.research.one_time_items = detectOneTimeItems(state);
+
 const fx = state.research?.financials?.fx_to_usd || {};
+const qAnchor = anchors.quarterly_10q;
+const fyAnchor = anchors.annual_10k;
+const ref8k = anchors.recent_8k;
 state.data_freshness = {
   fetched_at: now,
-  latest_filing_form: latestFiling?.form || null,
-  latest_filing_date: latestFiling?.filing_date || null,
-  latest_report_date: latestFiling?.report_date || null,
+  currency: 'USD',
+  quarterly_anchor_form: qAnchor?.form || null,
+  quarterly_anchor_filing_date: qAnchor?.filing_date || null,
+  quarterly_anchor_report_date: qAnchor?.report_date || null,
+  annual_anchor_form: fyAnchor?.form || null,
+  annual_anchor_filing_date: fyAnchor?.filing_date || null,
+  annual_anchor_report_date: fyAnchor?.report_date || null,
+  recent_8k_form: ref8k?.form || null,
+  recent_8k_filing_date: ref8k?.filing_date || null,
+  latest_filing_form: ref8k?.form || qAnchor?.form || fyAnchor?.form || null,
+  latest_filing_date: ref8k?.filing_date || qAnchor?.filing_date || fyAnchor?.filing_date || null,
+  latest_report_date: qAnchor?.report_date || fyAnchor?.report_date || null,
   sec_company_facts_url: state.research?.financials?.source_url || null,
   market_price_as_of: state.research?.market_data?.source_date || null,
-  native_reporting_currency: state.research?.financials?.native_currency || 'USD',
   fx_to_usd: fx.rate || null,
   fx_as_of: fx.as_of || null,
   fx_source: fx.source_name || null,
   issuer_profile: state.entity?.issuer_profile?.description || null,
-  rule: 'Financial figures are pulled live from SEC EDGAR (US-GAAP + IFRS taxonomies, 10-K/10-Q/20-F/6-K) and public market sources at execution time. Non-USD reporters are converted to USD using ECB reference rates.',
+  rule: 'Financial figures anchor on latest 10-Q/6-K (quarterly) and 10-K/20-F (annual). 8-K is a recent-filing reference only. All report output is USD.',
 };
 
 state.research.source_status = state.research.source_status || {};
@@ -82,6 +98,6 @@ state.audit_log.push({
   timestamp: now,
   workflow_name: 'WF_RESEARCH_PUBLIC',
   status: 'OK',
-  message: `Public research finalized. Market cap: ${marketCap ? fmtMetric(marketCap) : 'N/A'}. Issuer: ${state.entity?.issuer_profile?.type || 'unknown'}.`,
+  message: `Public research finalized. Market cap: ${marketCap ? fmtUsdValue(marketCap) : 'N/A'}. Quarterly anchor: ${qAnchor?.report_date || 'N/A'}. Annual anchor: ${fyAnchor?.report_date || 'N/A'}.`,
 });
 return [{ json: state }];

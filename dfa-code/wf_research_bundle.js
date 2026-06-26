@@ -36,7 +36,7 @@ state.entity.fiscal_year_end = state.entity.fiscal_year_end || submissions.fisca
 state.entity.exchange = state.entity.exchange || submissions.exchanges?.[0] || null;
 state.entity.ticker = state.entity.ticker || submissions.tickers?.[0] || prep.ticker || null;
 state.entity.native_reporting_currency = nativeCurrency;
-state.entity.reporting_currency = nativeCurrency === 'USD' ? 'USD' : `${nativeCurrency} (USD comparability via FX)`;
+state.entity.reporting_currency = 'USD';
 state.entity.issuer_profile = issuerProfile;
 state.entity.is_foreign_issuer = issuerProfile.type === 'foreign_private_issuer';
 state.entity.confidence = entityConfidence(state.entity, state.normalized);
@@ -64,6 +64,7 @@ state.research.filings = {
   recent_filings: recentFilings,
   issuer_profile: issuerProfile,
 };
+state.research.filing_anchors = resolveFilingAnchors(recentFilings, issuerProfile);
 state.research.peer_jobs = {
   status: 'public_sources_only',
   primary_logic: 'Use founder override peers first; otherwise industry defaults. Pull peer financials from SEC EDGAR for US public peers.',

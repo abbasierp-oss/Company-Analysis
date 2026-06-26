@@ -7,6 +7,9 @@ const peerNames = (inputPeers.length ? inputPeers : peerDefaults(industry, compa
   .filter((name) => normName(name) !== normName(company))
   .slice(0, 3);
 const metricLabels = ['Revenue', 'Gross Margin', 'Operating Margin', 'Net Margin', 'FCF Margin', 'Current Ratio', 'YoY Revenue Growth', '3-Year Revenue CAGR', 'Net Debt / EBITDA', 'Interest Coverage', 'ROCE/ROIC', 'Asset Turnover'];
+const directPeerMetrics = {
+  Revenue: 'revenue',
+};
 
 async function secGet(url) {
   return this.helpers.httpRequest({
@@ -26,8 +29,6 @@ if (!directory) {
 }
 
 function companyRowFromState() {
-  const pb = state.peer_benchmarks?.company_metrics;
-  if (pb) return pb;
   const m = state.normalized?.metrics || {};
   function latest(name) {
     const s = m[name] || [];
@@ -39,12 +40,12 @@ function companyRowFromState() {
     name: company,
     role: 'target company',
     metrics: {
-      Revenue: revenue ? fmtMetric(revenue.value) : 'N/A',
-      'Gross Margin': latest('gross_margin') ? fmtMetric(latest('gross_margin').value, true) : 'N/A',
-      'Operating Margin': latest('operating_margin') ? fmtMetric(latest('operating_margin').value, true) : 'N/A',
-      'Net Margin': latest('net_margin') ? fmtMetric(latest('net_margin').value, true) : 'N/A',
-      'FCF Margin': fcf && revenue ? fmtMetric(fcf.value / revenue.value, true) : 'N/A',
-      'Current Ratio': latest('current_ratio') ? Number(latest('current_ratio').value).toFixed(2) : 'N/A',
+      Revenue: revenue ? fmtUsdValue(revenue.value) : 'N/A',
+      'Gross Margin': latest('gross_margin') ? fmtPct(latest('gross_margin').value) : 'N/A',
+      'Operating Margin': latest('operating_margin') ? fmtPct(latest('operating_margin').value) : 'N/A',
+      'Net Margin': latest('net_margin') ? fmtPct(latest('net_margin').value) : 'N/A',
+      'FCF Margin': fcf && revenue ? fmtPct(fcf.value / revenue.value) : 'N/A',
+      'Current Ratio': latest('current_ratio') ? fmtRatio(latest('current_ratio').value) : 'N/A',
       'YoY Revenue Growth': 'N/A',
       '3-Year Revenue CAGR': 'N/A',
       'Net Debt / EBITDA': 'N/A',
@@ -73,23 +74,13 @@ for (let i = 0; i < peerNames.length; i++) {
       const merged = mergeCompactFacts(compactFactsFromTaxonomy(usGaap, 'us-gaap'), compactFactsFromTaxonomy(ifrs, 'ifrs-full'));
       const peerNative = detectNativeCurrency(usGaap, ifrs);
       const peerFx = peerNative === 'USD' ? { rate: 1, from_currency: 'USD' } : await fetchFxToUsd.call(this, peerNative);
-      const computed = computeEntityMetrics(merged, { source_name: 'SEC EDGAR Company Facts XBRL', cik, legal_name: best?.title || name, fetched_at: now, native_currency: peerNative }, peerFx);
-      metrics = {
-        Revenue: fmtMetric(computed.revenue_usd ?? computed.revenue, false, computed.revenue_usd ? 'USD' : peerNative),
-        'Gross Margin': fmtMetric(computed.gross_margin, true),
-        'Operating Margin': fmtMetric(computed.operating_margin, true),
-        'Net Margin': fmtMetric(computed.net_margin, true),
-        'FCF Margin': fmtMetric(computed.fcf_margin, true),
-        'Current Ratio': fmtMetric(computed.current_ratio),
-        'YoY Revenue Growth': fmtMetric(computed.yoy_revenue_growth, true),
-        '3-Year Revenue CAGR': fmtMetric(computed.revenue_cagr_3y, true),
-        'Net Debt / EBITDA': computed.net_debt_ebitda !== null ? Number(computed.net_debt_ebitda).toFixed(2) : 'N/A',
-        'Interest Coverage': fmtMetric(computed.interest_coverage),
-        'ROCE/ROIC': fmtMetric(computed.roce, true),
-        'Asset Turnover': fmtMetric(computed.asset_turnover),
-      };
-      source_status = 'SEC_PEER_FACTS_OK';
-      reliability = 'HIGH';
+      const fy = [2026, 2025, 2024, 2023].find((y) => peerMetricDirectOnly(merged, 'revenue', y, peerFx, peerNative)) || 2025;
+      for (const [label, metricKey] of Object.entries(directPeerMetrics)) {
+        const direct = peerMetricDirectOnly(merged, metricKey, fy, peerFx, peerNative);
+        metrics[label] = direct ? fmtUsdValue(direct.value) : 'N/A';
+      }
+      source_status = metrics.Revenue !== 'N/A' ? 'SEC_PEER_FACTS_OK' : 'SEC_PEER_NO_DIRECT_METRICS';
+      reliability = metrics.Revenue !== 'N/A' ? 'HIGH' : 'LOW';
     }
   } catch (e) {
     source_status = `SEC_FETCH_ERROR: ${e.message || e}`;
@@ -110,7 +101,7 @@ const markdown = [
   '|---|' + columns.slice(1).map(() => '---').join('|') + '|',
   ...allRows.map((row) => `| ${row.name} | ${row.role} | ${metricLabels.map((m) => row.metrics[m]).join(' | ')} |`),
   '',
-  'Interpretation: peer metrics are computed from live SEC EDGAR company facts at execution time. Cells remain N/A when the peer cannot be resolved to a US public CIK or required XBRL tags are missing.',
+  'Interpretation: peer metrics show N/A unless directly available from a single SEC EDGAR company-facts tag. Derived ratios and approximations are not computed for peers. Target company metrics use the normalized pipeline (USD).',
 ].join('\n');
 
 state.peer_benchmarks = {
@@ -127,6 +118,6 @@ state.audit_log.push({
   timestamp: now,
   workflow_name: 'WF_PEER_BENCHMARKS',
   status: peers.some((p) => p.source_status === 'SEC_PEER_FACTS_OK') ? 'OK' : 'WARN',
-  message: `Peer benchmark section built with ${peers.filter((p) => p.source_status === 'SEC_PEER_FACTS_OK').length}/${peers.length} SEC-backed peers.`,
+  message: `Peer benchmark section built with ${peers.filter((p) => p.source_status === 'SEC_PEER_FACTS_OK').length}/${peers.length} SEC-backed peers (direct tags only).`,
 });
 return [{ json: state }];

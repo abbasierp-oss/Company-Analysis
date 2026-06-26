@@ -1,165 +1,255 @@
 const state = items[0]?.json?.state || items[0]?.json || {};
 const now = new Date().toISOString();
 const facts = state.research?.financials?.merged_facts || state.research?.financials?.raw_us_gaap_facts || {};
-const metrics = state.normalized?.metrics || {};
 const fx = state.research?.financials?.fx_to_usd || {};
 const native = state.research?.financials?.native_currency || 'USD';
+const anchors = state.research?.filing_anchors || resolveFilingAnchors(
+  state.research?.filings?.recent_filings || [],
+  state.entity?.issuer_profile,
+);
+const oneTimeFlags = state.research?.one_time_items || detectOneTimeItems(state);
 
-function metricFromNormalized(name) {
-  const s = metrics[name] || [];
-  return Array.isArray(s) && s.length ? s[s.length - 1] : null;
-}
-
-function annual(metricKey, fy) {
-  const found = tagRowsMerged(facts, metricKey);
-  const row = latestAnnualRow(found.rows, fy);
-  if (!row) return null;
-  const unit = Object.keys(facts[found.tag]?.units || {})[0] || native;
-  const nativeVal = Number(row.val);
-  const usdVal = convertToUsd(nativeVal, unit, fx);
-  return {
-    value: usdVal !== null ? usdVal : nativeVal,
-    unit: usdVal !== null ? 'USD' : unit,
-    period: `FY${fy}`,
-    fiscal_label: `FY${fy}`,
-    source_name: `SEC EDGAR ${found.taxonomy || 'us-gaap'}:${found.tag}`,
-    source_url: state.research?.financials?.source_url || '',
-    source_date: row.filed || now,
-    source_section: row.form,
-    confidence: 'HIGH',
-  };
-}
-
-function quarterly(metricKey, q) {
-  if (!q) return null;
-  const found = tagRowsMerged(facts, metricKey);
-  const row = found.rows
-    .filter((r) => isInterimForm(r.form) && Number(r.fy) === Number(q.fy) && String(r.fp) === String(q.fp))
-    .sort((a, b) => String(a.filed || '').localeCompare(String(b.filed || '')))
-    .at(-1);
-  if (!row) return null;
-  const unit = Object.keys(facts[found.tag]?.units || {})[0] || native;
-  const nativeVal = Number(row.val);
-  const usdVal = convertToUsd(nativeVal, unit, fx);
-  return {
-    value: usdVal !== null ? usdVal : nativeVal,
-    unit: usdVal !== null ? 'USD' : unit,
-    period: `${q.fp} FY${q.fy}`,
-    fiscal_label: `${q.fp} FY${q.fy}`,
-    source_name: `SEC EDGAR ${found.taxonomy || 'us-gaap'}:${found.tag}`,
-    source_url: state.research?.financials?.source_url || '',
-    source_date: row.filed || now,
-    source_section: row.form,
-    confidence: 'HIGH',
-  };
-}
-
-function qPeriods() {
-  const found = tagRowsMerged(facts, 'revenue');
-  const rows = found.rows.filter((r) => isInterimForm(r.form) && r.fy && r.fp)
-    .sort((a, b) => String(a.end || '').localeCompare(String(b.end || '')) || String(a.filed || '').localeCompare(String(b.filed || '')));
-  const unique = [];
-  for (const row of rows) {
-    const key = `${row.fy}-${row.fp}`;
-    if (!unique.some((p) => p.key === key)) unique.push({ key, fy: row.fy, fp: row.fp, end: row.end });
+function enrichAnchor(anchor) {
+  if (!anchor) return null;
+  const copy = { ...anchor };
+  if (copy.report_date && (!copy.fy || !copy.fp)) {
+    const rev = tagRowsMerged(facts, 'revenue').rows
+      .filter((r) => String(r.end) === String(copy.report_date))
+      .sort((a, b) => String(a.filed || '').localeCompare(String(b.filed || '')))
+      .at(-1);
+    if (rev) {
+      copy.fy = copy.fy || rev.fy;
+      copy.fp = copy.fp || rev.fp;
+    }
   }
-  const latest = unique.at(-1) || null;
-  const previous = unique.at(-2) || null;
-  const sameLastYear = latest ? unique.find((p) => Number(p.fy) === Number(latest.fy) - 1 && p.fp === latest.fp) || null : null;
-  return { latest, previous, sameLastYear };
+  return copy;
 }
 
-function computed(name, inputs, fn, unit, formula) {
-  if (inputs.some((x) => !x || x.value === undefined || x.value === null) || (inputs[1] && Number(inputs[1].value) === 0)) return null;
+const qAnchor = enrichAnchor(anchors.quarterly_10q);
+const fyAnchor = enrichAnchor(anchors.annual_10k);
+const qPeriodLabel = qAnchor ? anchorPeriodLabel(qAnchor) : 'Latest Quarter';
+const fyPeriodLabel = fyAnchor ? anchorPeriodLabel(fyAnchor) : 'Latest Fiscal Year';
+
+function computedMetric(num, den, unit, formula, periodMeta, flagMetricId, periodLabel) {
+  if (!num || !den || den.value === null || den.value === undefined || Number(den.value) === 0) return null;
+  const flag = oneTimeFlagForMetric(oneTimeFlags, flagMetricId, periodLabel);
   return {
-    value: fn(...inputs.map((x) => Number(x.value))),
+    value: Number(num.value) / Number(den.value),
     unit,
-    period: inputs[0].period,
-    fiscal_label: inputs[0].fiscal_label,
-    source_name: inputs.map((x) => x.source_name).join(' + '),
-    source_url: inputs.map((x) => x.source_url).filter(Boolean).join(' | '),
-    source_date: inputs.map((x) => x.source_date).filter(Boolean).sort().at(-1) || now,
+    reporting_period: periodMeta.reporting_period,
+    period: periodMeta.period,
+    source_name: `${num.source_name} / ${den.source_name}`,
     source_section: 'computed',
+    source_date: [num.source_date, den.source_date].filter(Boolean).sort().at(-1),
     formula,
     confidence: 'MEDIUM',
+    one_time_flag: flag ? flag.label : null,
   };
 }
 
-function formatCell(cell) {
-  if (!cell) return { display: 'N/A', value: null, reason: 'Required source line item was not available.', confidence: 'N/A' };
-  const disp = cell.unit === 'ratio' ? `${(cell.value * 100).toFixed(1)}%` : `${cell.value} ${cell.unit || ''}`.trim();
-  return { display: disp, ...cell };
+function formatValue(cell, kind) {
+  if (!cell || cell.value === null || cell.value === undefined) return 'N/A';
+  if (kind === 'ratio') return fmtPct(cell.value);
+  if (kind === 'eps') return fmtEps(cell.value);
+  return fmtUsdValue(cell.value);
 }
 
-const qp = qPeriods();
-const periodDefs = [
-  { key: 'latest_quarter', label: 'Latest Reported Quarter', type: 'quarter', q: qp.latest },
-  { key: 'previous_quarter', label: 'Previous Quarter', type: 'quarter', q: qp.previous },
-  { key: 'same_quarter_last_year', label: 'Same Quarter Last Year', type: 'quarter', q: qp.sameLastYear },
-  ...[2025, 2024, 2023, 2022, 2021].map((fy) => ({ key: String(fy), label: String(fy), type: 'annual', fy })),
+function snapshotRow(metricId, label, anchor, kind, formula, flagMetricId) {
+  const periodLabel = anchor ? anchorPeriodLabel(anchor) : 'N/A';
+  let cell = null;
+  if (metricId === 'operating_margin') {
+    cell = computedMetric(
+      metricAtAnchor(facts, 'operating_income', anchor, fx, native),
+      metricAtAnchor(facts, 'revenue', anchor, fx, native),
+      'ratio',
+      'Operating income / revenue',
+      { reporting_period: anchor?.report_date, period: periodLabel },
+      flagMetricId || 'operating_margin',
+      periodLabel,
+    );
+  } else if (metricId === 'net_margin') {
+    cell = computedMetric(
+      metricAtAnchor(facts, 'net_income', anchor, fx, native),
+      metricAtAnchor(facts, 'revenue', anchor, fx, native),
+      'ratio',
+      'Net income / revenue',
+      { reporting_period: anchor?.report_date, period: periodLabel },
+      flagMetricId || 'net_margin',
+      periodLabel,
+    );
+  } else if (metricId === 'ebitda') {
+    const op = metricAtAnchor(facts, 'operating_income', anchor, fx, native);
+    const da = metricAtAnchor(facts, 'depreciation', anchor, fx, native);
+    if (op && da) {
+      cell = {
+        value: Number(op.value) + Number(da.value),
+        unit: 'USD',
+        reporting_period: op.reporting_period,
+        period: op.period,
+        source_name: `${op.source_name} + ${da.source_name}`,
+        source_section: 'computed',
+        source_date: op.source_date,
+        formula: 'Operating income + depreciation/amortization',
+        confidence: 'MEDIUM',
+      };
+    }
+  } else if (metricId === 'free_cash_flow') {
+    const ocf = metricAtAnchor(facts, 'operating_cash_flow', anchor, fx, native);
+    const capex = metricAtAnchor(facts, 'capex', anchor, fx, native);
+    if (ocf && capex) {
+      cell = {
+        value: Number(ocf.value) - Number(capex.value),
+        unit: 'USD',
+        reporting_period: ocf.reporting_period,
+        period: ocf.period,
+        source_name: `${ocf.source_name} - ${capex.source_name}`,
+        source_section: 'computed',
+        source_date: ocf.source_date,
+        formula: 'Operating cash flow - capex',
+        confidence: 'MEDIUM',
+      };
+    }
+  } else {
+    cell = metricAtAnchor(facts, metricId === 'eps' ? 'diluted_eps' : metricId, anchor, fx, native);
+    if (cell && metricId === 'eps') {
+      const flag = oneTimeFlagForMetric(oneTimeFlags, 'eps', periodLabel);
+      if (flag) cell.one_time_flag = flag.label;
+    }
+    if (cell && metricId === 'net_income') {
+      const flag = oneTimeFlagForMetric(oneTimeFlags, 'net_income', periodLabel);
+      if (flag) cell.one_time_flag = flag.label;
+    }
+  }
+  const flagNote = cell?.one_time_flag ? ` ⚠ ${cell.one_time_flag}` : '';
+  const source = cell
+    ? `${cell.source_section || 'SEC'} — ${cell.source_name || 'SEC EDGAR'}`
+    : 'N/A — required line item not found on anchored filing';
+  return {
+    metric: metricId,
+    label,
+    value_display: formatValue(cell, kind) + flagNote,
+    reporting_period: cell?.reporting_period || anchor?.report_date || 'N/A',
+    source,
+    raw: cell,
+    formula: cell?.formula || formula || null,
+  };
+}
+
+const quarterlyRows = [
+  snapshotRow('revenue', 'Revenue', qAnchor, 'usd'),
+  snapshotRow('operating_margin', 'Operating Margin', qAnchor, 'ratio', 'Operating income / revenue'),
+  snapshotRow('net_margin', 'Net Margin', qAnchor, 'ratio', 'Net income / revenue'),
+  snapshotRow('net_income', 'Net Income', qAnchor, 'usd'),
+  snapshotRow('ebitda', 'EBITDA', qAnchor, 'usd'),
+  snapshotRow('eps', 'EPS (diluted)', qAnchor, 'eps'),
+  snapshotRow('long_term_debt', 'Long-term Debt', qAnchor, 'usd'),
+  snapshotRow('free_cash_flow', 'Free Cash Flow (FCF)', qAnchor, 'usd'),
 ];
 
-function baseMetric(metric, period) {
-  if (period.type === 'annual') {
-    const norm = metrics[metric] || [];
-    const hit = [...norm].reverse().find((m) => String(m.period || '').includes(String(period.fy)));
-    if (hit) return hit;
-    return annual(metric, period.fy);
-  }
-  return quarterly(metric, period.q);
-}
-
-function metricFor(rowId, period) {
-  const revenue = baseMetric('revenue', period);
-  if (rowId === 'revenue') return revenue;
-  if (rowId === 'operating_margin') return computed('operating_margin', [baseMetric('operating_income', period), revenue], (op, rev) => op / rev, 'ratio', 'Operating income / revenue');
-  if (rowId === 'net_margin') return computed('net_margin', [baseMetric('net_income', period), revenue], (ni, rev) => ni / rev, 'ratio', 'Net income / revenue');
-  if (rowId === 'ebitda') {
-    const op = baseMetric('operating_income', period);
-    const da = baseMetric('depreciation', period);
-    return computed('ebitda', [op, da], (a, b) => a + b, 'USD', 'Operating income + depreciation/amortization');
-  }
-  if (rowId === 'eps') return baseMetric('diluted_eps', period);
-  if (rowId === 'long_term_debt') return baseMetric('long_term_debt', period);
-  if (rowId === 'free_cash_flow') return computed('fcf', [baseMetric('operating_cash_flow', period), baseMetric('capex', period)], (ocf, capex) => ocf - capex, 'USD', 'Operating cash flow - capex');
-  if (rowId === 'market_cap') {
-    const mc = state.research?.market_data?.market_cap_usd;
-    if (mc === null || mc === undefined) return null;
-    return {
-      value: mc,
-      unit: 'USD',
-      period: state.research?.market_data?.source_date || 'latest',
-      fiscal_label: 'Market cap',
-      source_name: state.research?.market_data?.source_name || 'Market data',
-      source_url: state.research?.market_data?.source_url || '',
-      source_date: state.research?.market_data?.source_date || now,
-      source_section: 'market_data',
-      formula: 'Share price x shares outstanding',
-      confidence: state.research?.market_data?.confidence || 'MEDIUM',
-    };
-  }
-  return null;
-}
-
-const rowDefs = [
-  ['revenue', 'Revenue'], ['operating_margin', 'Operating Margin'], ['net_margin', 'Net Margin'], ['ebitda', 'EBITDA'],
-  ['eps', 'EPS (diluted if available)'], ['long_term_debt', 'Long-term Debt'], ['free_cash_flow', 'Free Cash Flow (FCF)'], ['market_cap', 'Market Cap'],
+const annualRows = [
+  snapshotRow('revenue', 'Revenue', fyAnchor, 'usd'),
+  snapshotRow('operating_margin', 'Operating Margin', fyAnchor, 'ratio', 'Operating income / revenue'),
+  snapshotRow('net_margin', 'Net Margin', fyAnchor, 'ratio', 'Net income / revenue'),
+  snapshotRow('net_income', 'Net Income', fyAnchor, 'usd'),
+  snapshotRow('ebitda', 'EBITDA', fyAnchor, 'usd'),
+  snapshotRow('eps', 'EPS (diluted)', fyAnchor, 'eps'),
+  snapshotRow('long_term_debt', 'Long-term Debt', fyAnchor, 'usd'),
+  snapshotRow('free_cash_flow', 'Free Cash Flow (FCF)', fyAnchor, 'usd'),
 ];
-const rows = rowDefs.map(([id, label]) => ({ metric: id, label, cells: Object.fromEntries(periodDefs.map((p) => [p.label, formatCell(metricFor(id, p))])) }));
-const fxNote = native !== 'USD' && fx?.rate ? ` Native reporter currency ${native}; USD comparability uses ${fx.source_name || 'FX'} @ ${fx.rate} (${fx.as_of}).` : '';
+
+const market = state.research?.market_data || {};
+const marketRows = [
+  {
+    label: 'Market Cap',
+    value_display: market.market_cap_usd != null ? fmtUsdValue(market.market_cap_usd) : 'N/A',
+    reporting_period: market.source_date || 'latest',
+    source: market.source_name || 'Market data',
+  },
+  {
+    label: 'Share Price',
+    value_display: market.share_price_usd != null ? fmtUsdValue(market.share_price_usd) : 'N/A',
+    reporting_period: market.source_date || 'latest',
+    source: 'Yahoo Finance',
+  },
+  {
+    label: 'Shares Outstanding',
+    value_display: market.shares_outstanding != null ? Number(market.shares_outstanding).toLocaleString('en-US') : 'N/A',
+    reporting_period: market.shares_filed || market.source_date || 'latest',
+    source: market.shares_source || 'SEC DEI / Yahoo Finance',
+  },
+];
+
+function tableMarkdown(title, anchorNote, rows) {
+  return [
+    title,
+    '',
+    anchorNote,
+    '',
+    '| Metric | Value (USD) | Reporting Period | Source |',
+    '|---|---|---|---|',
+    ...rows.map((r) => `| ${r.label} | ${r.value_display} | ${r.reporting_period} | ${r.source} |`),
+  ].join('\n');
+}
+
+const qAnchorNote = qAnchor
+  ? `Anchored on ${qAnchor.form} filed ${qAnchor.filing_date || 'N/A'} (report period ${qAnchor.report_date || 'N/A'}).`
+  : 'No interim filing anchor found.';
+const fyAnchorNote = fyAnchor
+  ? `Anchored on ${fyAnchor.form} filed ${fyAnchor.filing_date || 'N/A'} (report period ${fyAnchor.report_date || 'N/A'}).`
+  : 'No annual filing anchor found.';
+const ref8k = anchors.recent_8k;
+const refNote = ref8k
+  ? `Recent 8-K reference (not used for financial anchors): ${ref8k.form} filed ${ref8k.filing_date || 'N/A'}.`
+  : 'No recent 8-K on file.';
+
+const markdownQuarterly = tableMarkdown(
+  `## Section 2a: Quarterly Financials (${qPeriodLabel})`,
+  qAnchorNote,
+  quarterlyRows,
+);
+const markdownAnnual = tableMarkdown(
+  `## Section 2b: Annual Financials (${fyPeriodLabel})`,
+  fyAnchorNote,
+  annualRows,
+);
+const markdownMarket = tableMarkdown(
+  '## Section 2c: Market Data',
+  'Market data is separate from SEC filing anchors. All values in USD.',
+  marketRows,
+);
+
 const markdown = [
-  '## Section 2: Financial Snapshot Table (USD comparability)',
+  markdownQuarterly,
   '',
-  '| Metric | ' + periodDefs.map((p) => p.label).join(' | ') + ' |',
-  '|---|' + periodDefs.map(() => '---').join('|') + '|',
-  ...rows.map((row) => `| ${row.label} | ${periodDefs.map((p) => row.cells[p.label].display).join(' | ')} |`),
+  markdownAnnual,
   '',
-  `Notes: Monetary figures shown in USD where FX conversion is available.${fxNote} N/A means the required source line item was not found on supported SEC forms (${SEC_ANNUAL_FORMS.join('/')}, ${SEC_INTERIM_FORMS.join('/')}).`,
+  markdownMarket,
+  '',
+  refNote,
+  '',
+  'Notes: All monetary figures are shown in USD. N/A means the required source line item was not found on the anchored SEC filing.',
 ].join('\n');
 
-state.financial_snapshot = { generated_at: now, currency: 'USD', native_currency: native, periods: periodDefs, rows, markdown };
+state.research.one_time_items = oneTimeFlags;
+state.financial_snapshot = {
+  generated_at: now,
+  currency: 'USD',
+  filing_anchors: anchors,
+  quarterly: { anchor: qAnchor, period_label: qPeriodLabel, rows: quarterlyRows, markdown: markdownQuarterly },
+  annual: { anchor: fyAnchor, period_label: fyPeriodLabel, rows: annualRows, markdown: markdownAnnual },
+  market_data: { rows: marketRows, markdown: markdownMarket },
+  markdown,
+};
 state.sections = state.sections || {};
+state.sections.s2_quarterly = markdownQuarterly;
+state.sections.s2_annual = markdownAnnual;
+state.sections.s2_market_data = markdownMarket;
 state.sections.s2_snapshot = markdown;
 state.audit_log = state.audit_log || [];
-state.audit_log.push({ timestamp: now, workflow_name: 'WF_FINANCIAL_SNAPSHOT', status: 'OK', message: 'Financial snapshot prepared with foreign-issuer SEC form support.' });
+state.audit_log.push({
+  timestamp: now,
+  workflow_name: 'WF_FINANCIAL_SNAPSHOT',
+  status: 'OK',
+  message: `Financial snapshot: quarterly ${qPeriodLabel}, annual ${fyPeriodLabel}, market data separated.`,
+});
 return [{ json: state }];

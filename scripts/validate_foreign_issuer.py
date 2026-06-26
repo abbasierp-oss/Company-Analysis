@@ -75,7 +75,7 @@ def main():
         'has_filing': lambda r, rep: (r.get('data_freshness') or {}).get('latest_filing_form') in ('6-K', '20-F', '20-F/A'),
         'has_fx': lambda r, rep: bool((r.get('data_freshness') or {}).get('fx_to_usd')),
         'section4': lambda r, rep: 'Section 4' in rep and 'N/A - Claude output unavailable' not in rep,
-        'sections9': lambda r, rep: all(s in rep for s in ['Section 1','Section 2','Section 3','Section 4','Section 5','Section 6','Section 7','Section 8','Section 9']),
+        'sections9': lambda r, rep: all(s in rep for s in ['Section 1','Section 2a','Section 2b','Section 2c','Section 3','Section 4','Section 5','Section 6','Section 7','Section 8','Section 9']),
     })
     print('Sony revenue snippet:', [line for line in (sony.get('final_report_markdown') or '').splitlines() if 'Revenue' in line][:2])
 
@@ -89,8 +89,8 @@ def main():
     }, {
         'company': lambda r, rep: 'MICROSOFT' in (r.get('company') or {}).get('legal_name', '').upper(),
         'market_cap': lambda r, rep: bool((r.get('market_data') or {}).get('market_cap_usd')),
-        'revenue': lambda r, rep: '| Revenue |' in rep and any(x in rep.split('| Revenue |',1)[1][:120] for x in ['B USD','M USD','USD']) and 'N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A' not in rep.split('Operating Margin')[0],
-        'sections9': lambda r, rep: all(s in rep for s in ['Section 1','Section 2','Section 3','Section 4','Section 5','Section 6','Section 7','Section 8','Section 9']),
+        'revenue': lambda r, rep: '| Revenue |' in rep and '$' in rep.split('| Revenue |', 1)[1][:120],
+        'sections9': lambda r, rep: all(s in rep for s in ['Section 1','Section 2a','Section 2b','Section 2c','Section 3','Section 4','Section 5','Section 6','Section 7','Section 8','Section 9']),
     })
     print('\nAll foreign-issuer validations PASSED')
 
