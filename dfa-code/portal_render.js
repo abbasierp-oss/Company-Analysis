@@ -113,16 +113,17 @@ const html = `<!doctype html>
         <div class="metric"><b>QA</b><span id="qa">-</span></div>
         <div class="actions">
           <button class="secondary" id="copyReport" type="button">Copy Full Report</button>
-          <button class="secondary" id="copyMarkdown" type="button">Copy Presentation Prompt</button>
+          <button id="copyPrompt" type="button">Copy Presentation Prompt</button>
         </div>
+        <p class="small" id="copyNotice"></p>
       </div>
       <div class="card box">
         <div class="tabs">
           <button class="tab active" data-tab="report" type="button">Full Report</button>
-          <button class="tab" data-tab="deck" type="button">Presentation Prompt</button>
+          <button class="tab" data-tab="prompt" type="button">Presentation Prompt</button>
         </div>
         <div id="panelReport" class="panel show"><pre id="report">Full report will appear here.</pre></div>
-        <div id="panelDeck" class="panel"><pre id="deck">Presentation prompt will appear here.</pre></div>
+        <div id="panelPrompt" class="panel"><pre id="prompt">Presentation prompt will appear here.</pre></div>
       </div>
     </section>
   </main>
@@ -136,11 +137,29 @@ const html = `<!doctype html>
     let latest = null;
     function apiBase() { return window.location.origin + '/webhook'; }
     function setText(id, value) { document.getElementById(id).textContent = value || '-'; }
-    function copyText(value) { navigator.clipboard.writeText(value || '').catch(() => alert('Copy failed.')); }
+    function copyText(value, label) {
+      const text = value || '';
+      if (!text) { alert('Nothing to copy yet.'); return; }
+      navigator.clipboard.writeText(text).then(() => {
+        const notice = document.getElementById('copyNotice');
+        if (notice) {
+          notice.textContent = (label || 'Content') + ' copied to clipboard.';
+          notice.className = 'small good';
+          setTimeout(() => { notice.textContent = ''; notice.className = 'small'; }, 2500);
+        }
+      }).catch(() => alert('Copy failed. Select the text manually.'));
+    }
+    function presentationPromptFrom(data) {
+      if (!data) return '';
+      if (data.presentation_prompt) return data.presentation_prompt;
+      const report = data.final_report_markdown || '';
+      const match = report.match(/## Executive Presentation Prompt[\\s\\S]*?```\\n([\\s\\S]*?)```/);
+      return match ? match[1].trim() : '';
+    }
     function showTab(name) {
       document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
       document.getElementById('panelReport').classList.toggle('show', name === 'report');
-      document.getElementById('panelDeck').classList.toggle('show', name === 'deck');
+      document.getElementById('panelPrompt').classList.toggle('show', name === 'prompt');
     }
     document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
     document.getElementById('nextBtn').addEventListener('click', () => {
@@ -187,8 +206,10 @@ const html = `<!doctype html>
         setText('fetchedAt', freshness.fetched_at || market.fetched_at || 'N/A');
         setText('latestFiling', (freshness.latest_filing_form || '') + ' ' + (freshness.latest_filing_date || ''));
         setText('qa', data.qa && data.qa.validation_status ? data.qa.validation_status : 'N/A');
+        const promptText = presentationPromptFrom(data);
         document.getElementById('report').textContent = data.final_report_markdown || 'No full report returned.';
-        document.getElementById('deck').textContent = data.presentation_prompt || 'No presentation prompt returned.';
+        document.getElementById('prompt').textContent = promptText || 'No presentation prompt returned.';
+        latest = { ...data, presentation_prompt: promptText };
         statusEl.classList.remove('show');
         resultsEl.classList.add('show');
       } catch (err) {
@@ -199,8 +220,8 @@ const html = `<!doctype html>
         runBtn.disabled = false;
       }
     });
-    document.getElementById('copyReport').addEventListener('click', () => copyText(latest && latest.final_report_markdown));
-    document.getElementById('copyMarkdown').addEventListener('click', () => copyText(latest && latest.presentation_prompt));
+    document.getElementById('copyReport').addEventListener('click', () => copyText(latest && latest.final_report_markdown, 'Full report'));
+    document.getElementById('copyPrompt').addEventListener('click', () => copyText(latest && latest.presentation_prompt, 'Presentation prompt'));
   </script>
 </body>
 </html>`;

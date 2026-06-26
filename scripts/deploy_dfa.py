@@ -36,7 +36,14 @@ def api(method, path, data=None):
         return json.load(r)
 
 
+def sanitize_workflow(wf):
+    """Drop stale version snapshots so repo and n8n stay aligned with top-level nodes."""
+    for key in ('activeVersion', 'activeVersionId', 'versionId', 'versionCounter'):
+        wf.pop(key, None)
+
+
 def put_workflow(wf):
+    sanitize_workflow(wf)
     payload = {
         'name': wf['name'],
         'nodes': wf['nodes'],
@@ -632,6 +639,7 @@ def main():
         else:
             wf = json.loads(path.read_text())
         fn(wf)
+        sanitize_workflow(wf)
         path.write_text(json.dumps(wf, indent=2))
         resp = put_workflow(wf)
         results.append((wf['name'], wid, 'OK', resp.get('updatedAt')))
