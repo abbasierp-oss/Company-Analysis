@@ -579,10 +579,14 @@ function formatAnchoredMetricValue(metric, kind) {
   return `${fmtUsdValue(metric.value)}${flag}`;
 }
 
-function metricCitation(metric, fallbackForm, fallbackPeriod) {
-  const src = metric?.source_name || fallbackForm || 'SEC EDGAR';
-  const period = metric?.reporting_period || fallbackPeriod || 'N/A';
-  return `Source: ${src} (${period})`;
+function metricCitationShort(metric, fallbackForm) {
+  if (metric?.source_name) return `Source: ${metric.source_name}`;
+  return `Source: SEC EDGAR ${fallbackForm || 'filing'}`;
+}
+
+function formatComputedMarketCapLabel(market) {
+  if (market?.market_cap_usd == null) return 'N/A';
+  return fmtUsdValue(market.market_cap_usd);
 }
 
 function formatQuarterlyMetric(metric, kind) {
@@ -609,7 +613,7 @@ function aggregateReportGaps(state) {
   if (qNa > 0) gaps.push({ metric: 'quarterly_ratios', reason: `${qNa} quarterly ratio(s) N/A on anchored filing.`, source: 'WF_RATIO_DASHBOARD', timestamp: ts });
   if (aNa > 0) gaps.push({ metric: 'annual_ratios', reason: `${aNa} annual ratio value(s) N/A.`, source: 'WF_RATIO_DASHBOARD', timestamp: ts });
   if (!state.research?.market_data?.market_cap_usd) {
-    gaps.push({ metric: 'market_cap', reason: 'Yahoo Finance market cap unavailable.', source: 'WF_RESEARCH_PUBLIC', timestamp: ts });
+    gaps.push({ metric: 'market_cap', reason: 'Computed market cap unavailable (requires Yahoo share price and SEC DEI shares outstanding).', source: 'WF_RESEARCH_PUBLIC', timestamp: ts });
   }
   return gaps;
 }
@@ -662,13 +666,17 @@ function buildLiveMarketData(meta, mergedFacts, deiFacts, qAnchor, ticker) {
   const priceNum = price != null ? Number(price) : null;
   const dei = deiSharesOutstanding(deiFacts);
   const dilutedWa = qAnchor ? dilutedSharesAtAnchor(mergedFacts, qAnchor) : null;
-  let marketCap = meta?.marketCap != null ? Number(meta.marketCap) : null;
-  let marketCapSource = 'Yahoo Finance meta.marketCap';
-  if (!marketCap && priceNum && dei?.value) {
+  let marketCap = null;
+  let marketCapSource = null;
+  let marketCapComputed = false;
+  if (priceNum && dei?.value) {
     marketCap = priceNum * dei.value;
     marketCapSource = 'Computed: Yahoo share price × SEC DEI shares outstanding';
+    marketCapComputed = true;
+  } else if (meta?.marketCap != null) {
+    marketCap = Number(meta.marketCap);
+    marketCapSource = 'Yahoo Finance meta.marketCap';
   }
-  const impliedShares = priceNum && marketCap ? marketCap / priceNum : null;
   const incomplete = priceNum != null && !marketCap;
   const yahooUrl = ticker ? `https://finance.yahoo.com/quote/${ticker}` : null;
   return {
@@ -680,6 +688,7 @@ function buildLiveMarketData(meta, mergedFacts, deiFacts, qAnchor, ticker) {
     share_price_currency: 'USD',
     market_cap_usd: marketCap,
     market_cap_source: marketCapSource,
+    market_cap_computed: marketCapComputed,
     shares_outstanding: dei?.value ?? null,
     shares_outstanding_source: dei?.source_name ?? null,
     shares_outstanding_as_of: dei?.reporting_period ?? null,
@@ -688,14 +697,12 @@ function buildLiveMarketData(meta, mergedFacts, deiFacts, qAnchor, ticker) {
     weighted_avg_diluted_shares_source: dilutedWa?.source_name ?? null,
     weighted_avg_diluted_shares_period: dilutedWa?.reporting_period ?? qAnchor?.report_date ?? null,
     weighted_avg_diluted_shares_note: 'From quarterly filing anchor (weighted-average diluted shares outstanding).',
-    implied_shares_outstanding: incomplete ? null : impliedShares,
-    implied_shares_note: incomplete ? null : 'Market-derived: market cap ÷ share price. Do not treat as a filing share count.',
     incomplete,
-    math_consistent: Boolean(priceNum && marketCap && impliedShares),
+    math_consistent: Boolean(priceNum && marketCap),
     math_note: incomplete
       ? 'Market data is incomplete: share price available but market cap could not be populated.'
       : (priceNum && marketCap
-        ? `${marketCapSource} @ ${asOf}: market cap ${fmtUsdValue(marketCap)}, price ${fmtUsdValue(priceNum)}${impliedShares ? `, implied shares ${Math.round(impliedShares).toLocaleString('en-US')}` : ''}.`
+        ? `${marketCapSource} @ ${asOf}: computed market cap ${fmtUsdValue(marketCap)}, price ${fmtUsdValue(priceNum)}.`
         : 'Yahoo Finance returned partial quote data.'),
     confidence: priceNum && marketCap ? 'MEDIUM' : 'LOW',
     fetched_at: new Date().toISOString(),
@@ -831,18 +838,16 @@ function buildDeterministicInsights(state) {
   const ref8k = state.data_freshness?.recent_8k_form;
   const ref8kDate = state.data_freshness?.recent_8k_filing_date;
   const peerReady = state.peer_benchmarks?.table_published === true;
-  const unusual = unusualQuarterNotes(state);
   return [
     '## Section 4: Three Strategic Insights',
     '',
     `Metric basis: quarterly anchor ${period} (report period ${qPeriod}). GAAP figures from SEC filings unless marked as interpretation.`,
     '',
     '### Insight 1 — Cash-flow quality and reinvestment',
-    `- Revenue: ${formatQuarterlyMetric(q.revenue)} — ${metricCitation(q.revenue, qForm, qPeriod)}`,
-    `- Operating margin: ${formatQuarterlyMetric(q.operating_margin, 'pct')} — ${metricCitation(q.operating_margin, qForm, qPeriod)} (computed: operating income ÷ revenue)`,
-    `- FCF: ${formatQuarterlyMetric(q.free_cash_flow)} — ${metricCitation(q.free_cash_flow, qForm, qPeriod)} (computed: operating cash flow − capex)`,
-    `- EPS: ${formatQuarterlyMetric(q.eps, 'eps')} — ${metricCitation(q.eps, qForm, qPeriod)}`,
-    ...(unusual.length ? ['', 'Unusual quarter items:', ...unusual] : []),
+    `- Revenue: ${formatQuarterlyMetric(q.revenue)} — ${metricCitationShort(q.revenue, qForm)}`,
+    `- Operating margin: ${formatQuarterlyMetric(q.operating_margin, 'pct')} — ${metricCitationShort(q.operating_margin, qForm)} (computed: operating income ÷ revenue)`,
+    `- FCF: ${formatQuarterlyMetric(q.free_cash_flow)} — ${metricCitationShort(q.free_cash_flow, qForm)} (computed: operating cash flow − capex)`,
+    `- EPS: ${formatQuarterlyMetric(q.eps, 'eps')} — ${metricCitationShort(q.eps, qForm)}`,
     `- Damodaran take (interpretation): Sustainable value creation depends on whether growth is backed by reinvestment and cash conversion, not headline revenue alone.`,
     `- So-what: ${state.inputs?.exec_type || 'Executive'} should prioritize the metric with the weakest source-backed trend before approving new spend.`,
     '',

@@ -86,6 +86,7 @@ state.research.news_event_jobs = {
     `${state.entity?.legal_name || state.inputs?.company_name} restructuring acquisition CEO CFO 2024 2025`,
     `${state.entity?.legal_name || state.inputs?.company_name} shareholder letter 2026`,
     `${state.entity?.legal_name || state.inputs?.company_name} warner bros termination fee 2026`,
+    `${state.entity?.legal_name || state.inputs?.company_name} board re-election 2026`,
   ],
   confidence: recentFilings.length ? 'MEDIUM' : 'LOW',
 };

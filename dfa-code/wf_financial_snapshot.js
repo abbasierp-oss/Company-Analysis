@@ -182,10 +182,10 @@ if (market.incomplete) {
 } else {
   const marketRows = [
     {
-      label: 'Market Cap',
+      label: 'Computed Market Cap',
       value_display: market.market_cap_usd != null ? fmtUsdValue(market.market_cap_usd) : 'N/A',
       reporting_period: market.source_date || 'latest',
-      source: `${market.market_cap_source || 'Yahoo Finance'} @ ${market.source_date || 'N/A'}`,
+      source: market.market_cap_source || 'Computed: Yahoo share price × SEC DEI shares outstanding',
     },
     {
       label: 'Share Price (Yahoo Finance)',
@@ -203,19 +203,13 @@ if (market.incomplete) {
       label: 'Weighted-Avg Diluted Shares (10-Q anchor)',
       value_display: market.weighted_avg_diluted_shares != null ? Number(market.weighted_avg_diluted_shares).toLocaleString('en-US') : 'N/A',
       reporting_period: market.weighted_avg_diluted_shares_period || qAnchor?.report_date || 'N/A',
-      source: market.weighted_avg_diluted_shares_source || 'SEC EDGAR quarterly anchor',
+      source: `${market.weighted_avg_diluted_shares_source || 'SEC EDGAR quarterly anchor'} — quarterly filing anchor; not market-implied shares`,
     },
-    ...(market.implied_shares_outstanding != null ? [{
-      label: 'Implied Shares (market cap ÷ price)',
-      value_display: Number(market.implied_shares_outstanding).toLocaleString('en-US', { maximumFractionDigits: 0 }),
-      reporting_period: market.source_date || 'latest',
-      source: market.implied_shares_note || 'Market-derived',
-    }] : []),
   ];
   markdownMarket = [
     tableMarkdown(
       '## Section 2c: Market Data',
-      `Single live source: Yahoo Finance @ ${market.source_date || 'N/A'}. ${market.math_note || ''}`,
+      `Live quote: Yahoo Finance @ ${market.source_date || 'N/A'}.`,
       marketRows,
     ),
     '',

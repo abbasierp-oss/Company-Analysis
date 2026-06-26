@@ -8,37 +8,38 @@ const qForm = state.data_freshness?.quarterly_anchor_form || '10-Q';
 const qPeriod = q.reporting_period || state.data_freshness?.quarterly_anchor_report_date || 'N/A';
 const market = state.research?.market_data || {};
 const peerPublished = state.peer_benchmarks?.table_published === true;
+const company = state.entity?.legal_name || state.inputs?.company_name || 'Company';
 
 const assessment = [
-  `Revenue ${formatQuarterlyMetric(q.revenue)} on ${period} (${metricCitation(q.revenue, qForm, qPeriod)}).`,
-  `Operating margin ${formatQuarterlyMetric(q.operating_margin, 'pct')}; FCF ${formatQuarterlyMetric(q.free_cash_flow)} on the same quarterly anchor.`,
-  `EPS ${formatQuarterlyMetric(q.eps, 'eps')}${q.eps?.one_time_flag ? ' — includes one-time items; see Section 2a unusual-quarter notes' : ''}.`,
+  `Revenue ${formatQuarterlyMetric(q.revenue)} (${metricCitationShort(q.revenue, qForm)}).`,
+  `Operating margin ${formatQuarterlyMetric(q.operating_margin, 'pct')}; FCF ${formatQuarterlyMetric(q.free_cash_flow)}.`,
+  `EPS ${formatQuarterlyMetric(q.eps, 'eps')}${q.eps?.one_time_flag ? ' — see Section 2a unusual-quarter notes' : ''}.`,
   market.market_cap_usd != null
-    ? `Market cap ${fmtUsdValue(market.market_cap_usd)} (${market.source_date || 'N/A'}, ${market.market_cap_source || 'Yahoo Finance'}).`
-    : 'Market cap unavailable from live quote.',
+    ? `Computed market cap ${fmtUsdValue(market.market_cap_usd)} (${market.market_cap_source || 'Yahoo share price × SEC DEI shares outstanding'}).`
+    : 'Computed market cap unavailable from live quote.',
   peerPublished
-    ? `Peer positioning: Section 3 FY${state.peer_benchmarks?.benchmark_fy || 2025} comparison available.`
-    : 'Peer comparison withheld — insufficient consistent peer data (Section 8).',
+    ? `Peer comparison available in Section 3 (FY${state.peer_benchmarks?.benchmark_fy || 2025}).`
+    : 'Peer comparison withheld — see Section 8 gaps.',
 ];
 
 const priorities = [
   {
     title: 'Validate cash conversion vs. reported earnings',
-    rationale: `FCF ${formatQuarterlyMetric(q.free_cash_flow)} vs. operating margin ${formatQuarterlyMetric(q.operating_margin, 'pct')} on ${period}.`,
+    rationale: `FCF ${formatQuarterlyMetric(q.free_cash_flow)} vs. operating margin ${formatQuarterlyMetric(q.operating_margin, 'pct')}.`,
     action: 'Reconcile net income to cash flow; isolate one-time items before setting margin targets.',
-    metric: 'FCF margin on quarterly anchor',
+    metric: 'FCF on quarterly anchor',
   },
   {
     title: 'Clarify capital structure narrative',
-    rationale: 'Section 7 flags capital-structure / M&A signals when supported by filings or shareholder communications.',
+    rationale: 'Section 7 summarizes filing-backed capital-structure signals when present.',
     action: 'Map disclosed financing or deal-related cash flows to leverage and reinvestment capacity.',
     metric: 'Net debt and interest coverage (FY ratios in Section 5)',
   },
   {
-    title: 'Set peer-credible operating targets',
-    rationale: peerPublished ? 'Use Section 3 FY peer margins as the external benchmark.' : 'Defer peer-based targets until Section 3 can be populated.',
+    title: 'Set filing-backed operating targets',
+    rationale: peerPublished ? 'Use Section 3 FY peer table where populated.' : 'Defer peer-based targets until Section 3 can be populated.',
     action: 'Adopt targets only where filing-backed baselines exist; mark gaps explicitly.',
-    metric: 'Operating margin vs. peer median',
+    metric: 'Operating margin on quarterly anchor',
   },
 ];
 
@@ -61,13 +62,13 @@ const markdown = [
   '',
   '### What I would not do yet',
   '- Do not set multi-year margin goals off a quarter with disclosed one-time items without an adjusted baseline.',
-  '- Do not use market-implied share count as a substitute for quarterly weighted-average diluted shares in per-share analysis.',
+  '- Do not substitute weighted-average diluted shares for point-in-time shares outstanding in market-cap math.',
   '- Do not cite peer rankings when Section 3 is withheld.',
 ].join('\n');
 
-state.executive_proposal = { generated_at: now, assessment, priorities, markdown, source: 'analyst_recommendation_v1' };
+state.executive_proposal = { generated_at: now, assessment, priorities, markdown, source: 'analyst_recommendation_v2' };
 state.sections = state.sections || {};
 state.sections.s6_proposal = markdown;
 state.audit_log = state.audit_log || [];
-state.audit_log.push({ timestamp: now, workflow_name: 'WF_PROPOSAL', status: 'OK', message: `Analyst-style executive proposal for ${period}.` });
+state.audit_log.push({ timestamp: now, workflow_name: 'WF_PROPOSAL', status: 'OK', message: `Analyst-style executive proposal for ${company}.` });
 return [{ json: state }];

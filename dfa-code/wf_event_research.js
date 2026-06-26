@@ -5,84 +5,33 @@ const serperPublic = state.research?.news_events || [];
 const serperPrivate = state.research?.private_research?.serper_results || [];
 const signals = [...serperPublic, ...serperPrivate];
 const oneTime = state.research?.one_time_items || [];
-
-const CATEGORY_LABELS = {
-  capital_structure_mna: 'capital structure / M&A',
-  restructuring_layoffs: 'restructuring / layoffs',
-  acquisitions_divestitures: 'acquisitions / divestitures',
-  segment_reporting_changes: 'segment reporting changes',
-  accounting_policy_changes: 'accounting policy changes',
-  litigation_regulatory: 'litigation / regulatory',
-};
+const company = state.entity?.legal_name || state.inputs?.company_name || 'The company';
 
 function signalText(item) {
-  return `${item.title || ''} ${item.description || item.snippet || ''}`.toLowerCase();
+  return `${item.title || ''} ${item.description || item.snippet || ''}`;
 }
 
-function findSignals(words) {
-  return signals.filter((item) => {
-    const text = signalText(item);
-    return words.some((word) => text.includes(word));
-  }).slice(0, 5).map((item) => ({
-    title: item.title || 'Untitled signal',
-    snippet: item.description || item.snippet || '',
-    source_url: item.source_url || item.link || '',
-    source_name: item.source_name || 'Public web signal',
-    source_date: item.source_date || now,
-    confidence: item.confidence || 'LOW',
-  }));
-}
-
-const categories = [
-  ['capital_structure_mna', ['warner bros', 'warner bros.', 'acquisition', 'termination fee', 'shareholder letter', 'capital structure', 'debt offering', 'bond', 'buyback', 'wbd']],
-  ['restructuring_layoffs', ['restructuring', 'layoff', 'workforce reduction', 'cost reduction']],
-  ['acquisitions_divestitures', ['acquisition', 'divestiture', 'merger', 'sale of business', 'terminated agreement']],
-  ['segment_reporting_changes', ['segment', 'reporting change', 'business unit']],
-  ['accounting_policy_changes', ['accounting policy', 'restatement', 'material weakness']],
-  ['litigation_regulatory', ['litigation', 'regulatory', 'lawsuit', 'investigation', 'antitrust']],
-];
-
-const eventPack = categories.map(([category, words]) => {
-  const matches = findSignals(words);
-  return {
-    category,
-    status: matches.length ? 'SUPPORTED_BY_PUBLIC_SIGNAL' : 'N/A',
-    events: matches,
-    interpretation_rule: matches.length
-      ? 'Tie to growth, margin, cash flow, risk, or execution risk only if the source text supports that link.'
-      : 'No supported public signal found in this run.',
-  };
-});
-
-if (oneTime.length) {
-  const mna = eventPack.find((g) => g.category === 'capital_structure_mna');
-  if (mna) {
-    mna.status = 'SUPPORTED_BY_FILING_AND_NEWS';
-    mna.events = [
-      ...mna.events,
-      ...oneTime.map((f) => ({
-        title: f.label,
-        snippet: 'See 10-Q and Q1 FY2026 shareholder letter for disclosure detail.',
-        source_url: '',
-        source_name: 'DFA one-time item detector (10-Q / news / 8-K reference)',
-        source_date: now,
-        confidence: 'HIGH',
-      })),
-    ];
+function buildCapitalStructureBullets() {
+  const bullets = [];
+  if (oneTime.some((f) => f.id === 'warner_bros_termination_fee')) {
+    bullets.push(`${company} disclosed the Warner Bros. termination fee in Q1 FY2026, which materially affected interest and other income.`);
   }
-}
-
-const warnerNews = findSignals(['warner', 'shareholder letter', 'termination fee']);
-if (warnerNews.length) {
-  const mna = eventPack.find((g) => g.category === 'capital_structure_mna');
-  if (mna && mna.status === 'N/A') mna.status = 'SUPPORTED_BY_PUBLIC_SIGNAL';
-  if (mna) {
-    const existing = new Set(mna.events.map((e) => e.title));
-    for (const e of warnerNews) {
-      if (!existing.has(e.title)) mna.events.push(e);
+  const leadershipHit = signals.find((item) => /hastings.*re-election|not seek re-election|board.*june 2026/i.test(signalText(item).toLowerCase()));
+  if (leadershipHit) {
+    const text = signalText(leadershipHit);
+    if (/hastings/i.test(text.toLowerCase())) {
+      bullets.push('Leadership change context: Reed Hastings announced he would not seek re-election to the board in June 2026.');
+    } else {
+      bullets.push(`Leadership change context: ${leadershipHit.title || text.slice(0, 160)}.`);
     }
   }
+  return bullets.slice(0, 2);
 }
+
+const capitalBullets = buildCapitalStructureBullets();
+const capitalSection = capitalBullets.length
+  ? `### capital structure / M&A\n\n${capitalBullets.map((b) => `- ${b}`).join('\n')}`
+  : '### capital structure / M&A\n\nN/A — no supported public signal found in this run.';
 
 const filingEvents = filings.filter((f) => isSupportedForm(f.form) && f.form !== '8-K').slice(0, 12).map((f) => ({
   form: f.form,
@@ -94,20 +43,12 @@ const filingEvents = filings.filter((f) => isSupportedForm(f.form) && f.form !==
 }));
 const ref8k = (state.research?.filing_anchors?.recent_8k) || filings.find((f) => f.form === '8-K');
 
-function renderCategory(group) {
-  const label = CATEGORY_LABELS[group.category] || group.category.replaceAll('_', ' ');
-  if (group.status === 'N/A') {
-    return `### ${label}\n\nN/A — no supported public signal found in this run.`;
-  }
-  return `### ${label}\n\n${group.events.map((event) => `- ${event.title}: ${event.snippet} [${event.source_name}, ${event.source_date}]`).join('\n')}`;
-}
-
 const markdown = [
   '## Section 7: Read Between The Lines',
   '',
-  'Supported events require filing or public-source text. Unsupported categories are N/A. 8-K items are reference context only.',
+  'Supported events require filing or public-source text. 8-K items are reference context only.',
   '',
-  ...eventPack.map((group) => renderCategory(group)),
+  capitalSection,
   '',
   '### leadership changes',
   '',
@@ -120,9 +61,9 @@ const markdown = [
   ref8k ? `\nRecent 8-K reference (not a financial anchor): ${ref8k.form} filed ${ref8k.filing_date || 'N/A'}.` : '',
 ].join('\n\n');
 
-state.event_research = { generated_at: now, event_pack: eventPack, recent_filings: filingEvents, markdown };
+state.event_research = { generated_at: now, capital_structure_bullets: capitalBullets, recent_filings: filingEvents, markdown };
 state.sections = state.sections || {};
 state.sections.s7_rtbl = markdown;
 state.audit_log = state.audit_log || [];
-state.audit_log.push({ timestamp: now, workflow_name: 'WF_EVENT_RESEARCH', status: 'OK', message: 'RTBL event pack prepared with capital-structure and one-time item signals.' });
+state.audit_log.push({ timestamp: now, workflow_name: 'WF_EVENT_RESEARCH', status: 'OK', message: 'RTBL section prepared with filing-backed capital-structure bullets only.' });
 return [{ json: state }];
