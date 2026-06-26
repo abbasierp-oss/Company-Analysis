@@ -224,12 +224,22 @@ def load_main_prod_base():
     import subprocess
     raw = subprocess.check_output(['git', 'show', '2cd73fd:dfa-workflows/Qc2t6hELYvHMtuox.json'])
     return json.loads(raw)
-    patch_timeouts(wf, 600)
-    wf['nodes'] = [
-        {'id': 'trigger', 'name': 'Subworkflow Input', 'type': 'n8n-nodes-base.executeWorkflowTrigger', 'typeVersion': 1, 'position': [0, 0], 'parameters': {}},
-        code_node('peer_fetch', 'Fetch Peer SEC Benchmarks', [300, 0], bundle('wf_peer_benchmarks.js')),
-    ]
-    wf['connections'] = {'Subworkflow Input': {'main': [[{'node': 'Fetch Peer SEC Benchmarks', 'type': 'main', 'index': 0}]]}}
+
+
+def patch_entity(wf):
+    set_node_code(wf, 'Resolve Entity Contract', bundle('wf_FeMaDjwmiGFGCc6n.js'))
+
+
+def patch_normalize(wf):
+    set_node_code(wf, 'Normalize Source Tagged Data', bundle('wf_normalize.js'))
+
+
+def patch_event_research(wf):
+    set_node_code(wf, 'Build Read Between Lines Event Pack', bundle('wf_event_research.js'))
+
+
+def patch_ratio_dashboard(wf):
+    set_node_code(wf, 'Build Full Ratio Dashboard', bundle('wf_ratio_dashboard.js'))
 
 
 def patch_research_public(wf):
@@ -254,6 +264,7 @@ def patch_research_public(wf):
     names = {n['name'] for n in wf['nodes']}
     if 'Fetch Live Market Price' not in names:
         wf['nodes'].append(market_node)
+    set_node_code(wf, 'Build Public Research Bundle', bundle('wf_research_bundle.js'))
     set_node_code(wf, 'Attach Public Serper Events', bundle('wf_research_attach.js'))
     wf['connections']['Serper Public News Search'] = {'main': [[{'node': 'Fetch Live Market Price', 'type': 'main', 'index': 0}]]}
     wf['connections']['Fetch Live Market Price'] = {'main': [[{'node': 'Attach Public Serper Events', 'type': 'main', 'index': 0}]]}
@@ -299,14 +310,7 @@ def patch_assemble_qa(wf):
 
 
 def patch_financial_snapshot(wf):
-    for n in wf['nodes']:
-        if n['name'] == 'Build Exact Financial Snapshot':
-            code = n['parameters']['jsCode']
-            code = code.replace(
-                "if (rowId === 'market_cap') return null;",
-                "if (rowId === 'market_cap') {\n    const mc = state.research?.market_data?.market_cap_usd;\n    if (mc === null || mc === undefined) return null;\n    return { value: mc, unit: 'USD', period: state.research?.market_data?.source_date || 'latest', fiscal_label: 'Market cap', source_name: state.research?.market_data?.source_name || 'Market data', source_url: state.research?.market_data?.source_url || '', source_date: state.research?.market_data?.source_date || now, source_section: 'market_data', formula: 'Share price x diluted shares outstanding (SEC)', confidence: state.research?.market_data?.confidence || 'MEDIUM' };\n  }"
-            )
-            n['parameters']['jsCode'] = code
+    set_node_code(wf, 'Build Exact Financial Snapshot', bundle('wf_financial_snapshot.js'))
 
 
 def patch_timeouts(wf, seconds=900):
@@ -563,12 +567,16 @@ return [{ json: state }];""")
 def main():
     patches_order = [
         ('tL3TaqFH9zZR0sAo', patch_approval),
+        ('FeMaDjwmiGFGCc6n', patch_entity),
         ('ygI1X49erRcL5Agz', patch_peer_benchmarks),
         ('vgS7dQ1OeCpHpXrU', patch_research_public),
+        ('MhFxSrdHKqi4LkE5', patch_normalize),
+        ('uCs3FRw2T3nplPIE', patch_financial_snapshot),
+        ('4glaQsweWGS4lmDy', patch_ratio_dashboard),
+        ('nSibhacyiyR8Vwxx', patch_event_research),
         ('u7zcuTFphfzjenZ0', patch_proposal),
         ('VY5O6pYOMa28iWJb', patch_value_realization),
         ('Hep7G1mvINz1NdqG', patch_assemble_qa),
-        ('uCs3FRw2T3nplPIE', patch_financial_snapshot),
         ('RLp9AMthAvTC0iBC', patch_analyze),
         ('0purjOnIMYZOauYb', patch_api_start),
         ('n7RG6ijbdmdOrGll', patch_status_api),

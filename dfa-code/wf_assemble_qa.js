@@ -10,11 +10,13 @@ state.sections.s1_source_pack = state.sections.s1_source_pack || [
   `Legal name: ${state.entity?.legal_name || 'N/A'}`,
   `Ticker/CIK: ${state.entity?.ticker || 'N/A'} / ${state.entity?.cik || 'N/A'}`,
   `Exchange: ${state.entity?.exchange || 'N/A'}`,
+  `Issuer profile: ${state.entity?.issuer_profile?.description || 'N/A'}`,
   `Fiscal year-end: ${state.entity?.fiscal_year_end || 'N/A'}`,
-  `Reporting currency: ${state.entity?.reporting_currency || 'USD'}`,
+  `Native reporting currency: ${state.entity?.native_reporting_currency || state.research?.financials?.native_currency || 'N/A'}`,
+  `USD comparability: ${freshness.fx_to_usd ? `FX ${freshness.fx_to_usd} (${freshness.fx_source || 'ECB'}) as of ${freshness.fx_as_of || 'N/A'}` : 'Native USD reporter'}`,
   `Market cap: ${market.market_cap_usd ? fmtMetric(market.market_cap_usd) : 'N/A'} (${market.source_date || 'N/A'})`,
   `Market cap source: ${market.source_name || 'N/A'}`,
-  `Reliability: ${state.entity?.confidence || 'LOW'}`,
+  `Reliability: ${entityConfidence(state.entity, state.normalized)}`,
   `Latest filing: ${freshness.latest_filing_form || 'N/A'} filed ${freshness.latest_filing_date || 'N/A'}`,
   `Data fetched at: ${freshness.fetched_at || now}`,
   '',
@@ -72,6 +74,8 @@ const citationQa = {
 };
 if (!citationQa.peer_benchmark_ready) citationQa.warning_notes.push('No SEC-backed peer metrics in this run.');
 if (!citationQa.data_freshness_recorded) citationQa.warning_notes.push('Data freshness stamp missing.');
+if ((state.normalized?.gaps || []).length > 8) citationQa.warning_notes.push('High gap count — verify issuer profile and SEC form coverage.');
+if (state.entity?.is_foreign_issuer && !(state.normalized?.metrics?.revenue || []).length) citationQa.warning_notes.push('Foreign issuer with no normalized revenue — check 20-F/IFRS extraction.');
 const qaWarnings = [...missing.map((id) => `Missing section: ${id}`), ...citationQa.warning_notes];
 state.qa = {
   missing_sections: missing,

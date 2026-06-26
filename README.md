@@ -15,10 +15,11 @@ End-to-end n8n production system that produces a 9-section Damodaran-style finan
 
 Financials are **never cached across runs**. On every execution:
 
-1. **SEC EDGAR** — company facts, filings, and XBRL metrics fetched at runtime
-2. **Yahoo Finance** — live share price for market cap (price × SEC diluted shares)
-3. **`data_freshness` stamp** — `fetched_at`, latest filing form/date, market price as-of
-4. **Peer benchmarks** — up to 3 peers resolved via SEC directory + company facts API
+1. **SEC EDGAR** — US-GAAP **and IFRS** taxonomies from company facts API
+2. **Filing coverage** — domestic (`10-K`/`10-Q`) and foreign issuers (`20-F`/`6-K`)
+3. **FX conversion** — non-USD reporters converted to USD via ECB reference rates (Frankfurter API)
+4. **Yahoo Finance** — live share price; Yahoo shares fallback when SEC share count is stale
+5. **`data_freshness` stamp** — filings, FX rate, native currency, issuer profile
 
 All figures are USD. Missing data is explicitly marked `N/A`.
 

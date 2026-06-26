@@ -3,7 +3,7 @@ const now = new Date().toISOString();
 const industry = String(state.inputs?.industry || '').toLowerCase();
 const company = state.entity?.legal_name || state.inputs?.company_name || 'Company';
 const inputPeers = parsePeerList(state.inputs?.peer_list || state.inputs?.advanced_context?.peers || state.inputs?.advanced_context?.known_competitors);
-const peerNames = (inputPeers.length ? inputPeers : peerDefaults(industry))
+const peerNames = (inputPeers.length ? inputPeers : peerDefaults(industry, company))
   .filter((name) => normName(name) !== normName(company))
   .slice(0, 3);
 const metricLabels = ['Revenue', 'Gross Margin', 'Operating Margin', 'Net Margin', 'FCF Margin', 'Current Ratio', 'YoY Revenue Growth', '3-Year Revenue CAGR', 'Net Debt / EBITDA', 'Interest Coverage', 'ROCE/ROIC', 'Asset Turnover'];
@@ -69,10 +69,13 @@ for (let i = 0; i < peerNames.length; i++) {
     if (cik) {
       const factsResp = await secGet.call(this, `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`);
       const usGaap = factsResp?.facts?.['us-gaap'] || {};
-      const compact = compactFacts(usGaap);
-      const computed = computeEntityMetrics(compact, { source_name: 'SEC EDGAR Company Facts XBRL', cik, legal_name: best?.title || name, fetched_at: now });
+      const ifrs = factsResp?.facts?.['ifrs-full'] || {};
+      const merged = mergeCompactFacts(compactFactsFromTaxonomy(usGaap, 'us-gaap'), compactFactsFromTaxonomy(ifrs, 'ifrs-full'));
+      const peerNative = detectNativeCurrency(usGaap, ifrs);
+      const peerFx = peerNative === 'USD' ? { rate: 1, from_currency: 'USD' } : await fetchFxToUsd.call(this, peerNative);
+      const computed = computeEntityMetrics(merged, { source_name: 'SEC EDGAR Company Facts XBRL', cik, legal_name: best?.title || name, fetched_at: now, native_currency: peerNative }, peerFx);
       metrics = {
-        Revenue: fmtMetric(computed.revenue),
+        Revenue: fmtMetric(computed.revenue_usd ?? computed.revenue, false, computed.revenue_usd ? 'USD' : peerNative),
         'Gross Margin': fmtMetric(computed.gross_margin, true),
         'Operating Margin': fmtMetric(computed.operating_margin, true),
         'Net Margin': fmtMetric(computed.net_margin, true),
