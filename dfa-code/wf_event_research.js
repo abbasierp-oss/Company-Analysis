@@ -7,28 +7,16 @@ const signals = [...serperPublic, ...serperPrivate];
 const oneTime = state.research?.one_time_items || [];
 const company = state.entity?.legal_name || state.inputs?.company_name || 'The company';
 
-function signalText(item) {
-  return `${item.title || ''} ${item.description || item.snippet || ''}`;
-}
-
 function buildCapitalStructureBullets() {
   const bullets = [];
   if (oneTime.some((f) => f.id === 'warner_bros_termination_fee')) {
     bullets.push(`${company} disclosed the Warner Bros. termination fee in Q1 FY2026, which materially affected interest and other income.`);
   }
-  const leadershipHit = signals.find((item) => /hastings.*re-election|not seek re-election|board.*june 2026/i.test(signalText(item).toLowerCase()));
-  if (leadershipHit) {
-    const text = signalText(leadershipHit);
-    if (/hastings/i.test(text.toLowerCase())) {
-      bullets.push('Leadership change context: Reed Hastings announced he would not seek re-election to the board in June 2026.');
-    } else {
-      bullets.push(`Leadership change context: ${leadershipHit.title || text.slice(0, 160)}.`);
-    }
-  }
-  return bullets.slice(0, 2);
+  return bullets.slice(0, 1);
 }
 
 const capitalBullets = buildCapitalStructureBullets();
+const leadershipBullet = detectLeadershipBullet(state, signals);
 const capitalSection = capitalBullets.length
   ? `### capital structure / M&A\n\n${capitalBullets.map((b) => `- ${b}`).join('\n')}`
   : '### capital structure / M&A\n\nN/A — no supported public signal found in this run.';
@@ -52,7 +40,7 @@ const markdown = [
   '',
   '### leadership changes',
   '',
-  'N/A — no filing-backed leadership change signal found in this run.',
+  leadershipBullet || 'N/A — no filing-backed leadership change signal found in this run.',
   '',
   'Recent operating filing context (financial anchors):',
   ...(filingEvents.length
@@ -61,9 +49,9 @@ const markdown = [
   ref8k ? `\nRecent 8-K reference (not a financial anchor): ${ref8k.form} filed ${ref8k.filing_date || 'N/A'}.` : '',
 ].join('\n\n');
 
-state.event_research = { generated_at: now, capital_structure_bullets: capitalBullets, recent_filings: filingEvents, markdown };
+state.event_research = { generated_at: now, capital_structure_bullets: capitalBullets, leadership_bullet: leadershipBullet, recent_filings: filingEvents, markdown };
 state.sections = state.sections || {};
 state.sections.s7_rtbl = markdown;
 state.audit_log = state.audit_log || [];
-state.audit_log.push({ timestamp: now, workflow_name: 'WF_EVENT_RESEARCH', status: 'OK', message: 'RTBL section prepared with filing-backed capital-structure bullets only.' });
+state.audit_log.push({ timestamp: now, workflow_name: 'WF_EVENT_RESEARCH', status: 'OK', message: 'RTBL section prepared with capital-structure and leadership bullets.' });
 return [{ json: state }];

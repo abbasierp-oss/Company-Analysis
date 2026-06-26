@@ -47,7 +47,7 @@ const markdown = [
   '## Section 6: Executive Proposal — Analyst Recommendations',
   '',
   `Audience: ${execType} | Industry: ${industry}`,
-  `Basis: quarterly anchor ${period} (report period ${qPeriod}); GAAP unless noted.`,
+  `Basis: quarterly anchor ${period}; GAAP unless noted.`,
   '',
   '### Assessment (filing-backed)',
   ...assessment.map((line) => `- ${line}`),

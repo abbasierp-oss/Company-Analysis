@@ -584,9 +584,39 @@ function metricCitationShort(metric, fallbackForm) {
   return `Source: SEC EDGAR ${fallbackForm || 'filing'}`;
 }
 
-function formatComputedMarketCapLabel(market) {
-  if (market?.market_cap_usd == null) return 'N/A';
-  return fmtUsdValue(market.market_cap_usd);
+function companyDisplayName(entity, inputs) {
+  const legal = entity?.legal_name || inputs?.company_name || 'the company';
+  const ticker = String(entity?.ticker || inputs?.ticker || '').toUpperCase();
+  if (ticker === 'NFLX' || /netflix/i.test(legal)) return 'Netflix';
+  return legal.replace(/\s+(Inc|Corp|Corporation|Ltd|Group|Co)\.?$/i, '').trim() || legal;
+}
+
+function detectLeadershipBullet(state, signals) {
+  const display = companyDisplayName(state.entity, state.inputs);
+  const items = Array.isArray(signals) ? signals : [];
+  for (const item of items) {
+    const text = `${item.title || ''} ${item.description || item.snippet || ''}`;
+    const lower = text.toLowerCase();
+    if (!/re-election|re election|step down|resign|appointed (ceo|cfo)|board.*annual meeting|leadership transition/i.test(lower)) continue;
+    if (/hastings/i.test(lower) && /not seek re-election|won't seek re-election|will not seek re-election/i.test(lower)) {
+      return `Reed Hastings will not seek re-election to ${display}'s board at the June annual meeting.`;
+    }
+    const nameMatch = text.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\s+(?:will\s+not|won't|to)\s+(?:seek\s+)?re-election/i);
+    if (nameMatch) {
+      const month = /june/i.test(lower) ? 'June' : (/may/i.test(lower) ? 'May' : 'the upcoming');
+      return `${nameMatch[1]} will not seek re-election to ${display}'s board at the ${month} annual meeting.`;
+    }
+    const title = String(item.title || '').trim();
+    if (title.length > 24 && title.length < 220 && /board|ceo|cfo|re-election|resign/i.test(title)) {
+      return title.endsWith('.') ? title : `${title}.`;
+    }
+  }
+  return null;
+}
+
+function formatMarketCapProof(market) {
+  if (!market?.market_cap_usd) return 'Computed market cap unavailable.';
+  return `Computed market cap ${fmtUsdValue(market.market_cap_usd)} from Yahoo share price and SEC DEI shares outstanding.`;
 }
 
 function formatQuarterlyMetric(metric, kind) {
@@ -841,7 +871,7 @@ function buildDeterministicInsights(state) {
   return [
     '## Section 4: Three Strategic Insights',
     '',
-    `Metric basis: quarterly anchor ${period} (report period ${qPeriod}). GAAP figures from SEC filings unless marked as interpretation.`,
+    `Metric basis: quarterly anchor ${period}. GAAP figures from SEC filings unless marked as interpretation.`,
     '',
     '### Insight 1 — Cash-flow quality and reinvestment',
     `- Revenue: ${formatQuarterlyMetric(q.revenue)} — ${metricCitationShort(q.revenue, qForm)}`,
