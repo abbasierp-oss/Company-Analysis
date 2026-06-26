@@ -1,0 +1,170 @@
+{
+  "updatedAt": "2026-06-26T17:11:09.026Z",
+  "createdAt": "2026-06-24T10:34:16.076Z",
+  "id": "u7zcuTFphfzjenZ0",
+  "name": "DFA - WF_PROPOSAL",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Subworkflow Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "logic",
+      "name": "Build Executive Proposal Section",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Shared DFA financial utilities (inlined into n8n Code nodes)\nconst SEC_UA = 'DamodaranAnalystSystem/2.0 contact@goevolo.com';\n\nfunction normName(v) {\n  return String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');\n}\n\nfunction tagRows(facts, tags) {\n  for (const tag of tags) {\n    const fact = facts[tag];\n    if (!fact?.units) continue;\n    const rows = Object.values(fact.units).flat().filter((r) => r && r.val !== undefined);\n    if (rows.length) return { tag, rows };\n  }\n  return { tag: tags[0], rows: [] };\n}\n\nfunction latestAnnualRow(rows, fy) {\n  return rows\n    .filter((r) => r.form === '10-K' && Number(r.fy) === Number(fy))\n    .sort((a, b) => String(a.end || '').localeCompare(String(b.end || '')) || String(a.filed || '').localeCompare(String(b.filed || '')))\n    .at(-1) || null;\n}\n\nfunction latestQuarterRows(rows) {\n  const qrows = rows.filter((r) => r.form === '10-Q' && r.fy && r.fp)\n    .sort((a, b) => String(a.end || '').localeCompare(String(b.end || '')) || String(a.filed || '').localeCompare(String(b.filed || '')));\n  const uniq = [];\n  for (const row of qrows) {\n    const key = `${row.fy}-${row.fp}`;\n    if (!uniq.some((p) => p.key === key)) uniq.push({ key, fy: row.fy, fp: row.fp, end: row.end, filed: row.filed });\n  }\n  return uniq;\n}\n\nfunction compactFacts(usGaapAll) {\n  const supported = [\n    'RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet',\n    'GrossProfit', 'OperatingIncomeLoss', 'NetIncomeLoss', 'ProfitLoss',\n    'NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations',\n    'PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets',\n    'LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent', 'LongTermDebtAndFinanceLeaseObligationsCurrent',\n    'AssetsCurrent', 'LiabilitiesCurrent', 'InterestExpenseNonOperating', 'InterestExpense',\n    'EarningsPerShareDiluted', 'DepreciationDepletionAndAmortization', 'DepreciationDepletionAndAmortizationExpense', 'DepreciationAndAmortization',\n    'StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest',\n    'Assets', 'Liabilities', 'CashAndCashEquivalentsAtCarryingValue', 'ShortTermBorrowings'\n  ];\n  const out = {};\n  for (const tag of supported) {\n    const fact = usGaapAll[tag];\n    if (!fact?.units) continue;\n    const units = {};\n    for (const [unitName, rows] of Object.entries(fact.units)) {\n      if (!Array.isArray(rows)) continue;\n      const compact = rows\n        .filter((r) => r && r.val !== undefined && ['10-K', '10-Q'].includes(r.form))\n        .sort((a, b) => String(a.filed || '').localeCompare(String(b.filed || '')) || String(a.end || '').localeCompare(String(b.end || '')))\n        .slice(-20)\n        .map((r) => ({ end: r.end, val: r.val, fy: r.fy, fp: r.fp, form: r.form, filed: r.filed, frame: r.frame }));\n      if (compact.length) units[unitName] = compact;\n    }\n    if (Object.keys(units).length) out[tag] = { label: fact.label, units };\n  }\n  return out;\n}\n\nfunction resolveCikFromDirectory(directory, companyName, ticker) {\n  const rows = Array.isArray(directory) ? directory : Object.values(directory || {});\n  const nameNorm = normName(companyName);\n  const tickerNorm = normName(ticker);\n  function score(row) {\n    const title = row.title || row.name || '';\n    const rowTicker = row.ticker || '';\n    const titleNorm = normName(title);\n    const rowTickerNorm = normName(rowTicker);\n    let points = 0;\n    if (tickerNorm && rowTickerNorm === tickerNorm) points += 120;\n    if (titleNorm === nameNorm) points += 100;\n    if (nameNorm && titleNorm.startsWith(nameNorm)) points += 70;\n    if (nameNorm && titleNorm.includes(nameNorm)) points += 45;\n    return points;\n  }\n  const ranked = rows\n    .filter((row) => row && (row.title || row.name) && (row.cik_str || row.cik))\n    .map((row) => ({ row, score: score(row) }))\n    .filter((e) => e.score > 0)\n    .sort((a, b) => b.score - a.score);\n  const best = ranked[0]?.row || null;\n  const rawCik = best?.cik_str || best?.cik || null;\n  const cik = rawCik ? String(rawCik).padStart(10, '0') : null;\n  return { best, cik, ranked };\n}\n\nfunction metricFromFacts(facts, metric, fy) {\n  const map = {\n    revenue: ['RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet'],\n    gross_profit: ['GrossProfit'],\n    operating_income: ['OperatingIncomeLoss'],\n    net_income: ['NetIncomeLoss', 'ProfitLoss'],\n    operating_cash_flow: ['NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations'],\n    capex: ['PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets'],\n    long_term_debt: ['LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent'],\n    current_assets: ['AssetsCurrent'],\n    current_liabilities: ['LiabilitiesCurrent'],\n    interest_expense: ['InterestExpenseNonOperating', 'InterestExpense'],\n    equity: ['StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest'],\n    assets: ['Assets'],\n    cash: ['CashAndCashEquivalentsAtCarryingValue'],\n    depreciation: ['DepreciationDepletionAndAmortization', 'DepreciationDepletionAndAmortizationExpense', 'DepreciationAndAmortization']\n  };\n  const found = tagRows(facts, map[metric] || [metric]);\n  const row = latestAnnualRow(found.rows, fy);\n  return row ? Number(row.val) : null;\n}\n\nfunction computeEntityMetrics(facts, sourceMeta) {\n  const years = [2025, 2024, 2023];\n  const latestFy = years.find((fy) => metricFromFacts(facts, 'revenue', fy) !== null) || years[1];\n  const revenue = metricFromFacts(facts, 'revenue', latestFy);\n  const gross = metricFromFacts(facts, 'gross_profit', latestFy);\n  const op = metricFromFacts(facts, 'operating_income', latestFy);\n  const net = metricFromFacts(facts, 'net_income', latestFy);\n  const ocf = metricFromFacts(facts, 'operating_cash_flow', latestFy);\n  const capex = metricFromFacts(facts, 'capex', latestFy);\n  const ca = metricFromFacts(facts, 'current_assets', latestFy);\n  const cl = metricFromFacts(facts, 'current_liabilities', latestFy);\n  const interest = metricFromFacts(facts, 'interest_expense', latestFy);\n  const debt = metricFromFacts(facts, 'long_term_debt', latestFy);\n  const equity = metricFromFacts(facts, 'equity', latestFy);\n  const assets = metricFromFacts(facts, 'assets', latestFy);\n  const cash = metricFromFacts(facts, 'cash', latestFy);\n  const dep = metricFromFacts(facts, 'depreciation', latestFy);\n  const revY1 = metricFromFacts(facts, 'revenue', latestFy - 1);\n  const revY3 = metricFromFacts(facts, 'revenue', latestFy - 3);\n  const fcf = ocf !== null && capex !== null ? ocf - capex : null;\n  const ebitda = op !== null && dep !== null ? op + dep : null;\n  const safeDiv = (a, b) => (a !== null && b !== null && b !== 0 ? a / b : null);\n  return {\n    period: `FY${latestFy}`,\n    revenue,\n    gross_margin: safeDiv(gross, revenue),\n    operating_margin: safeDiv(op, revenue),\n    net_margin: safeDiv(net, revenue),\n    ebitda_margin: safeDiv(ebitda, revenue),\n    fcf_margin: safeDiv(fcf, revenue),\n    current_ratio: safeDiv(ca, cl),\n    debt_to_equity: safeDiv(debt, equity),\n    interest_coverage: safeDiv(op, interest),\n    roce: safeDiv(op, assets && cl !== null ? assets - cl : null),\n    asset_turnover: safeDiv(revenue, assets),\n    yoy_revenue_growth: safeDiv(revenue && revY1 ? revenue - revY1 : null, revY1),\n    revenue_cagr_3y: revY3 && revenue && revY3 > 0 ? Math.pow(revenue / revY3, 1 / 3) - 1 : null,\n    net_debt_ebitda: ebitda && debt !== null && cash !== null && ebitda !== 0 ? (debt - cash) / ebitda : null,\n    source_meta: sourceMeta\n  };\n}\n\nfunction fmtMetric(v, asPct = false) {\n  if (v === null || v === undefined || Number.isNaN(v)) return 'N/A';\n  if (asPct) return `${(v * 100).toFixed(1)}%`;\n  if (Math.abs(v) >= 1e9) return `${(v / 1e9).toFixed(2)}B USD`;\n  if (Math.abs(v) >= 1e6) return `${(v / 1e6).toFixed(1)}M USD`;\n  return `${Number(v).toLocaleString('en-US')} USD`;\n}\n\nfunction peerDefaults(industry) {\n  const key = String(industry || '').toLowerCase();\n  const defaults = {\n    technology: ['Microsoft', 'Alphabet', 'Meta Platforms', 'Amazon', 'NVIDIA'],\n    saas: ['Salesforce', 'Adobe', 'ServiceNow', 'Atlassian', 'Workday'],\n    retail: ['Walmart', 'Costco', 'Target', 'Amazon', 'Home Depot'],\n    banking: ['JPMorgan Chase', 'Bank of America', 'Wells Fargo', 'Citigroup', 'Goldman Sachs'],\n    healthcare: ['UnitedHealth Group', 'HCA Healthcare', 'Elevance Health', 'CVS Health', 'Humana'],\n    manufacturing: ['General Electric', 'Honeywell', 'Caterpillar', '3M', 'Siemens'],\n    gaming: ['Electronic Arts', 'Take-Two Interactive', 'Roblox', 'Nintendo', 'Sony'],\n    media: ['Disney', 'Netflix', 'Comcast', 'Warner Bros. Discovery', 'Paramount Global']\n  };\n  const match = Object.keys(defaults).find((k) => key.includes(k)) || 'technology';\n  return defaults[match];\n}\n\nfunction parsePeerList(raw) {\n  if (!raw) return [];\n  if (Array.isArray(raw)) return raw;\n  return String(raw).split(/[,;\\n|]/).map((s) => s.trim()).filter(Boolean);\n}\n\nfunction claudeBaseSystem(inputs, expert) {\n  return `You are an AI financial analyst who thinks like Aswath Damodaran. Evidence first. Every figure must come from the provided JSON only. Never fabricate numbers. If data is missing, write N/A and explain why. Show formulas for computed metrics. Do not use templating placeholders or curly-brace variables. Industry lens: ${expert?.name || inputs.expert_pref || 'industry expert'}. Executive audience: ${inputs.exec_type || 'executive'}. Service provider: ${inputs.service_provider || 'MY COMPANY'}.`;\n}\n\nfunction parseClaudeJson(response) {\n  const content = response?.content || [];\n  const text = content.map((p) => p.text || '').join('\\n').trim() || JSON.stringify(response);\n  try { return JSON.parse(text); } catch (e) {}\n  const match = text.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { return JSON.parse(match[0]); } catch (e) {} }\n  return { _raw: text };\n}\n\nconst state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nconst execType = state.inputs?.exec_type || 'executive';\nconst industry = state.inputs?.industry || 'industry';\nconst provider = state.inputs?.service_provider || 'MY COMPANY';\nconst metrics = state.normalized?.metrics || {};\nfunction latest(name) { const s = metrics[name] || []; return Array.isArray(s) && s.length ? s[s.length - 1] : null; }\nfunction signal(name, label) { const item = latest(name); return item ? `${label}: ${item.value} ${item.unit || ''} (${item.period || 'latest'})` : `${label}: N/A`; }\nconst peerGaps = (state.peer_benchmarks?.peers || []).filter((p) => p.source_status === 'SEC_PEER_FACTS_OK').length;\nconst painPoints = [\n  `Cash-flow and margin focus: ${signal('free_cash_flow','FCF')} and ${signal('operating_margin','operating margin')}.`,\n  `Market cap / scale: ${state.research?.market_data?.market_cap_usd ? fmtMetric(state.research.market_data.market_cap_usd) : 'N/A'} as of ${state.research?.market_data?.source_date || 'latest'}.`,\n  `Peer context: ${peerGaps} SEC-backed peer comparisons available in section 3.`,\n  `Data freshness: financials fetched at ${state.data_freshness?.fetched_at || now}; latest filing ${state.data_freshness?.latest_filing_form || 'N/A'} (${state.data_freshness?.latest_filing_date || 'N/A'}).`,\n  `Operating visibility: connect finance automation and data workflows to margin, cash conversion, and risk for the ${execType}.`,\n].slice(0, 5);\nconst initiatives = [\n  { name: 'Metric-to-value diagnostic', targets: ['operating_margin','fcf_margin'], mechanism: 'Map source-backed signals to controllable levers.', fit: `${provider} finance transformation and data/AI diagnostic.`, impact: 'Conservative: 25-75 bps margin opportunity if waste confirmed.', timeline: '0-3 months', risks: 'Weak data ownership; assign metric owners.' },\n  { name: 'Close and reporting automation', targets: ['close_cycle_days','forecast_accuracy'], mechanism: 'Standardize definitions and automate manual reporting.', fit: `${provider} finance transformation and cloud ERP.`, impact: 'Faster executive decisions; fewer reporting errors.', timeline: '0-3 months diagnostic, 3-12 months rollout', risks: 'System fragmentation; phased integration.' },\n  { name: 'Cash-conversion improvement', targets: ['fcf_margin','working_capital_days'], mechanism: 'Improve billing, collections, and cash application.', fit: `${provider} order-to-cash automation.`, impact: 'Cash-cycle improvement if bottlenecks validated.', timeline: '3-12 months', risks: 'Contract complexity; segment redesign.' },\n];\nconst markdown = ['## Section 6: Executive Proposal - Move The Metrics', '', `Audience: ${execType}`, `Industry: ${industry}`, `Service provider: ${provider}`, '', '### Top Trends / Pain Points', ...painPoints.map((p) => `- ${p}`), '', '### Initiatives', ...initiatives.map((item, i) => [`${i + 1}. ${item.name}`, `Targets: ${item.targets.join(', ')}`, `Mechanism: ${item.mechanism}`, `${provider} fit: ${item.fit}`, `Impact: ${item.impact}`, `Timeline: ${item.timeline}`, `Risks: ${item.risks}`].join('\\n'))].join('\\n\\n');\nstate.executive_proposal = { generated_at: now, pain_points: painPoints, initiatives, markdown, source: 'enhanced_rule_based_v2' };\nstate.sections = state.sections || {};\nstate.sections.s6_proposal = markdown;\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_PROPOSAL', status: 'OK', message: 'Executive proposal generated with live metrics and peer context.' });\nreturn [{ json: state }];\n"
+      }
+    }
+  ],
+  "connections": {
+    "Subworkflow Input": {
+      "main": [
+        [
+          {
+            "node": "Build Executive Proposal Section",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Karachi",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "executionTimeout": 300,
+    "saveExecutionProgress": false
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "da5f4c66-e8bc-4b3d-84ff-ac5fa2b2612d",
+  "activeVersionId": "da5f4c66-e8bc-4b3d-84ff-ac5fa2b2612d",
+  "versionCounter": 3,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-24T10:34:16.077Z",
+      "createdAt": "2026-06-24T10:34:16.077Z",
+      "role": "workflow:owner",
+      "workflowId": "u7zcuTFphfzjenZ0",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-06-24T11:25:52.602Z",
+      "createdAt": "2026-06-24T11:25:52.602Z",
+      "id": "PvqNmKlzG0X72TtP",
+      "name": "DFA Analyst System"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-06-26T17:11:09.027Z",
+    "createdAt": "2026-06-26T17:11:09.027Z",
+    "versionId": "da5f4c66-e8bc-4b3d-84ff-ac5fa2b2612d",
+    "workflowId": "u7zcuTFphfzjenZ0",
+    "nodes": [
+      {
+        "id": "trigger",
+        "name": "Subworkflow Input",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "inputSource": "passthrough"
+        }
+      },
+      {
+        "id": "logic",
+        "name": "Build Executive Proposal Section",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          260,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nconst execType = state.inputs?.exec_type || 'executive';\nconst industry = state.inputs?.industry || 'industry';\nconst provider = state.inputs?.service_provider || 'MY COMPANY';\nconst metrics = state.normalized?.metrics || {};\nfunction latest(name) { const s = metrics[name] || []; return Array.isArray(s) && s.length ? s[s.length - 1] : null; }\nfunction signal(name, label) { const item = latest(name); return item ? `${label}: ${item.value} ${item.unit || ''} (${item.period || 'latest'})` : `${label}: N/A`; }\nconst painPoints = [\n  `Cash-flow and margin focus: ${signal('free_cash_flow','FCF')} and ${signal('operating_margin','operating margin')}.`,\n  `Data confidence and gaps: ${state.normalized?.source_coverage?.gap_count || 0} normalized gaps require executive interpretation before making claims.`,\n  `Peer context: ${state.peer_benchmarks?.peers?.length || 0} peers selected; benchmark metrics are used only when source-backed.`,\n  `Operating visibility: finance, automation, and data workflows should connect actions to margin, cash conversion, and risk.`,\n  `Risk discipline: unsupported metrics stay N/A, so the proposal starts with a diagnostic where data is incomplete.`\n].slice(0, 5);\nconst initiatives = [\n  { name: 'Metric-to-value diagnostic', targets: ['operating_margin','fcf_margin','revenue_growth'], mechanism: 'Map source-backed financial signals to controllable operating levers.', fit: `${provider} finance transformation and data/AI diagnostic.`, impact: 'Conservative hypothesis: identify 25-75 bps of margin opportunity if manual waste or leakage is confirmed.', timeline: '0-3 months', risks: 'Weak data ownership; mitigate by assigning metric owners and source-of-truth systems.' },\n  { name: 'Finance reporting and close automation', targets: ['close_cycle_days','forecast_accuracy','manual_hours'], mechanism: 'Reduce manual spreadsheet work and standardize reporting definitions.', fit: `${provider} finance transformation, automation, and cloud ERP services.`, impact: 'Qualitative impact: faster executive decisions and fewer reporting errors; quantify after baseline close-cycle review.', timeline: '0-3 months diagnostic, 3-12 months rollout', risks: 'System fragmentation; mitigate with phased integrations.' },\n  { name: 'Order-to-cash and cash-conversion improvement', targets: ['fcf_margin','dso','working_capital_days'], mechanism: 'Improve billing accuracy, collections workflow, dispute routing, and cash application.', fit: `${provider} order-to-cash automation and analytics.`, impact: 'Conservative hypothesis: cash-cycle improvement if aging/dispute bottlenecks are validated.', timeline: '3-12 months', risks: 'Customer contract complexity; mitigate with segmented process redesign.' },\n  { name: 'Procurement and operating spend control', targets: ['gross_margin','operating_margin','procurement_savings'], mechanism: 'Improve spend visibility, supplier terms, approval controls, and leakage detection.', fit: `${provider} procurement, supply chain, and finance operations services.`, impact: 'Qualitative impact: improved spend governance; quantified range only after spend cube analysis.', timeline: '3-12 months', risks: 'Incomplete supplier/category data; mitigate through rapid spend normalization.' },\n  { name: 'Risk, compliance, and platform modernization', targets: ['risk_reduction','audit_findings','system_downtime'], mechanism: 'Prioritize control gaps and systems modernization by business impact.', fit: `${provider} cloud ERP, compliance, and security modernization.`, impact: 'Qualitative impact: lower operating risk and stronger audit readiness.', timeline: '12+ months for scaled modernization', risks: 'Change fatigue; mitigate with executive roadmap and quick wins.' }\n];\nconst markdown = ['## Section 6: Executive Proposal - Move The Metrics', '', `Audience: ${execType}`, `Industry: ${industry}`, `Service provider: ${provider}`, '', '### Top Financial Or Operational Trends / Pain Points', ...painPoints.map((p) => `- ${p}`), '', '### Initiatives', ...initiatives.map((item, index) => [`${index + 1}. ${item.name}`, `Target metric(s): ${item.targets.join(', ')}`, `Mechanism: ${item.mechanism}`, `${provider} service fit: ${item.fit}`, `Expected impact hypothesis: ${item.impact}`, `Timeline: ${item.timeline}`, `Dependencies/risks and mitigation: ${item.risks}`].join('\\n'))].join('\\n\\n');\nstate.proposal_jobs = [];\nstate.executive_proposal = { generated_at: now, pain_points: painPoints, initiatives, markdown };\nstate.sections = state.sections || {};\nstate.sections.s6_proposal = markdown;\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_PROPOSAL', status: 'OK', message: 'Full executive proposal section generated and tied to metrics/gaps.' });\nreturn [{ json: state }];"
+        }
+      }
+    ],
+    "connections": {
+      "Subworkflow Input": {
+        "main": [
+          [
+            {
+              "node": "Build Executive Proposal Section",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Abdullah  Dilshad",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-26T17:11:09.248Z",
+        "id": 257,
+        "workflowId": "u7zcuTFphfzjenZ0",
+        "versionId": "da5f4c66-e8bc-4b3d-84ff-ac5fa2b2612d",
+        "event": "activated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      },
+      {
+        "createdAt": "2026-06-26T17:11:09.167Z",
+        "id": 256,
+        "workflowId": "u7zcuTFphfzjenZ0",
+        "versionId": "da5f4c66-e8bc-4b3d-84ff-ac5fa2b2612d",
+        "event": "deactivated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    ]
+  }
+}

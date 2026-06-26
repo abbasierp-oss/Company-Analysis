@@ -1,0 +1,99 @@
+{
+  "updatedAt": "2026-06-24T11:55:56.957Z",
+  "createdAt": "2026-06-24T10:34:07.635Z",
+  "id": "tL3TaqFH9zZR0sAo",
+  "name": "DFA - WF_APPROVAL",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Subworkflow Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "logic",
+      "name": "Prepare Human Review Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst reviewRequired = Boolean(state.inputs?.human_review);\nstate.approval = {\n  required: reviewRequired,\n  status: reviewRequired ? 'pending_human_review' : 'auto_approved',\n  slack_message_template: reviewRequired ? `Report ready for ${state.inputs?.company_name}. Approve | Request Changes | Reject` : null,\n};\nstate.delivery = state.delivery || {};\nstate.delivery.status = reviewRequired ? 'pending_approval' : 'approved_for_gamma';\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: new Date().toISOString(), workflow_name: 'WF_APPROVAL', status: reviewRequired ? 'PENDING' : 'SKIPPED', message: reviewRequired ? 'Human review required before external delivery.' : 'Auto-approved.' });\nreturn [{ json: state }];"
+      }
+    }
+  ],
+  "connections": {
+    "Subworkflow Input": {
+      "main": [
+        [
+          {
+            "node": "Prepare Human Review Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Karachi",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "executionTimeout": 300,
+    "saveExecutionProgress": false
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "9e049442-e322-47b3-9ca9-6f8dfec1b0a8",
+  "activeVersionId": null,
+  "versionCounter": 2,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-24T10:34:07.637Z",
+      "createdAt": "2026-06-24T10:34:07.637Z",
+      "role": "workflow:owner",
+      "workflowId": "tL3TaqFH9zZR0sAo",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-06-24T11:25:52.602Z",
+      "createdAt": "2026-06-24T11:25:52.602Z",
+      "id": "PvqNmKlzG0X72TtP",
+      "name": "DFA Analyst System"
+    }
+  ],
+  "activeVersion": null
+}

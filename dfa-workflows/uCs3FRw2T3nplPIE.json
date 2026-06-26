@@ -1,0 +1,148 @@
+{
+  "updatedAt": "2026-06-26T17:11:18.454Z",
+  "createdAt": "2026-06-26T17:06:58.052Z",
+  "id": "uCs3FRw2T3nplPIE",
+  "name": "DFA - WF_FINANCIAL_SNAPSHOT",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Subworkflow Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "snapshot",
+      "name": "Build Exact Financial Snapshot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nconst facts = state.research?.financials?.raw_us_gaap_facts || {};\nconst metrics = state.normalized?.metrics || {};\nfunction tagRows(tags) {\n  for (const tag of tags) {\n    const fact = facts[tag];\n    if (!fact?.units) continue;\n    const rows = Object.values(fact.units).flat().filter((row) => row && row.val !== undefined);\n    if (rows.length) return { tag, rows };\n  }\n  return { tag: tags[0], rows: [] };\n}\nconst tagMap = {\n  revenue: ['RevenueFromContractWithCustomerExcludingAssessedTax','Revenues','SalesRevenueNet'],\n  gross_profit: ['GrossProfit'],\n  operating_income: ['OperatingIncomeLoss'],\n  net_income: ['NetIncomeLoss','ProfitLoss'],\n  depreciation_amortization: ['DepreciationDepletionAndAmortization','DepreciationDepletionAndAmortizationExpense','DepreciationAndAmortization'],\n  diluted_eps: ['EarningsPerShareDiluted'],\n  long_term_debt: ['LongTermDebtAndFinanceLeaseObligationsNoncurrent','LongTermDebtNoncurrent','LongTermDebtAndFinanceLeaseObligationsCurrent'],\n  operating_cash_flow: ['NetCashProvidedByUsedInOperatingActivities','NetCashProvidedByUsedInOperatingActivitiesContinuingOperations'],\n  capex: ['PaymentsToAcquirePropertyPlantAndEquipment','PaymentsToAcquireProductiveAssets']\n};\nfunction source(row, tag, formula) {\n  return { source_name: `SEC EDGAR Company Facts:${tag}`, source_url: state.research?.financials?.source_url || '', source_date: row?.filed || now, source_section: row?.form || 'companyfacts', formula: formula || null, confidence: row ? 'HIGH' : 'N/A' };\n}\nfunction latestBy(rows, predicate) {\n  return rows.filter(predicate).sort((a,b) => String(a.end || '').localeCompare(String(b.end || '')) || String(a.filed || '').localeCompare(String(b.filed || ''))).at(-1) || null;\n}\nfunction annual(tagKey, fy) {\n  const found = tagRows(tagMap[tagKey] || [tagKey]);\n  const row = latestBy(found.rows, (r) => r.form === '10-K' && Number(r.fy) === Number(fy));\n  return row ? { value: row.val, unit: inferUnit(tagKey), period: `FY${fy}`, fiscal_label: `FY${fy}`, ...source(row, found.tag) } : null;\n}\nfunction quarterly(tagKey, q) {\n  if (!q) return null;\n  const found = tagRows(tagMap[tagKey] || [tagKey]);\n  const row = latestBy(found.rows, (r) => r.form === '10-Q' && Number(r.fy) === Number(q.fy) && String(r.fp) === String(q.fp));\n  return row ? { value: row.val, unit: inferUnit(tagKey), period: `${q.fp} FY${q.fy}`, fiscal_label: `${q.fp} FY${q.fy}`, ...source(row, found.tag) } : null;\n}\nfunction inferUnit(key) { return key === 'diluted_eps' ? 'USD/share' : 'USD'; }\nfunction qPeriods() {\n  const found = tagRows(tagMap.revenue);\n  const rows = found.rows.filter((r) => r.form === '10-Q' && r.fy && r.fp).sort((a,b) => String(a.end || '').localeCompare(String(b.end || '')) || String(a.filed || '').localeCompare(String(b.filed || '')));\n  const unique = [];\n  for (const row of rows) {\n    const key = `${row.fy}-${row.fp}`;\n    if (!unique.some((p) => p.key === key)) unique.push({ key, fy: row.fy, fp: row.fp, end: row.end });\n  }\n  const latest = unique.at(-1) || null;\n  const previous = unique.at(-2) || null;\n  const sameLastYear = latest ? unique.find((p) => Number(p.fy) === Number(latest.fy) - 1 && p.fp === latest.fp) || null : null;\n  return { latest, previous, sameLastYear };\n}\nfunction computed(name, inputs, fn, unit, formula) {\n  if (inputs.some((x) => !x || x.value === undefined || x.value === null) || (inputs[1] && Number(inputs[1].value) === 0)) return null;\n  return { value: fn(...inputs.map((x) => Number(x.value))), unit, period: inputs[0].period, fiscal_label: inputs[0].fiscal_label, source_name: inputs.map((x) => x.source_name).join(' + '), source_url: inputs.map((x) => x.source_url).filter(Boolean).join(' | '), source_date: inputs.map((x) => x.source_date).filter(Boolean).sort().at(-1) || now, source_section: 'computed', formula, confidence: inputs.every((x) => x.confidence === 'HIGH') ? 'HIGH' : 'MEDIUM' };\n}\nfunction formatCell(cell) {\n  if (!cell) return { display: 'N/A', value: null, reason: 'Required source line item was not available.', confidence: 'N/A' };\n  return { display: `${cell.value} ${cell.unit || ''}`.trim(), ...cell };\n}\nconst qp = qPeriods();\nconst periodDefs = [\n  { key: 'latest_quarter', label: 'Latest Reported Quarter', type: 'quarter', q: qp.latest },\n  { key: 'previous_quarter', label: 'Previous Quarter', type: 'quarter', q: qp.previous },\n  { key: 'same_quarter_last_year', label: 'Same Quarter Last Year', type: 'quarter', q: qp.sameLastYear },\n  ...[2025,2024,2023,2022,2021].map((fy) => ({ key: String(fy), label: String(fy), type: 'annual', fy }))\n];\nfunction baseMetric(metric, period) { return period.type === 'quarter' ? quarterly(metric, period.q) : annual(metric, period.fy); }\nfunction metricFor(rowId, period) {\n  const revenue = baseMetric('revenue', period);\n  if (rowId === 'revenue') return revenue;\n  if (rowId === 'operating_margin') return computed(rowId, [baseMetric('operating_income', period), revenue], (op, rev) => op / rev, 'ratio', 'Operating income / revenue');\n  if (rowId === 'net_margin') return computed(rowId, [baseMetric('net_income', period), revenue], (ni, rev) => ni / rev, 'ratio', 'Net income / revenue');\n  if (rowId === 'ebitda') {\n    const op = baseMetric('operating_income', period); const da = baseMetric('depreciation_amortization', period);\n    return computed(rowId, [op, da], (a,b) => a + b, 'USD', 'Approximate EBITDA = operating income + depreciation and amortization');\n  }\n  if (rowId === 'eps') return baseMetric('diluted_eps', period);\n  if (rowId === 'long_term_debt') return baseMetric('long_term_debt', period);\n  if (rowId === 'free_cash_flow') return computed(rowId, [baseMetric('operating_cash_flow', period), baseMetric('capex', period)], (ocf, capex) => ocf - capex, 'USD', 'Operating cash flow - capital expenditures');\n  if (rowId === 'market_cap') {\n    const mc = state.research?.market_data?.market_cap_usd;\n    if (mc === null || mc === undefined) return null;\n    return { value: mc, unit: 'USD', period: state.research?.market_data?.source_date || 'latest', fiscal_label: 'Market cap', source_name: state.research?.market_data?.source_name || 'Market data', source_url: state.research?.market_data?.source_url || '', source_date: state.research?.market_data?.source_date || now, source_section: 'market_data', formula: 'Share price x diluted shares outstanding (SEC)', confidence: state.research?.market_data?.confidence || 'MEDIUM' };\n  }\n  return null;\n}\nconst rowDefs = [\n  ['revenue','Revenue'], ['operating_margin','Operating Margin'], ['net_margin','Net Margin'], ['ebitda','EBITDA'], ['eps','EPS (diluted if available)'], ['long_term_debt','Long-term Debt'], ['free_cash_flow','Free Cash Flow (FCF)'], ['market_cap','Market Cap']\n];\nconst rows = rowDefs.map(([id,label]) => ({ metric: id, label, cells: Object.fromEntries(periodDefs.map((p) => [p.label, formatCell(metricFor(id, p))])) }));\nconst markdown = ['## Section 2: Financial Snapshot Table (USD)', '', '| Metric | ' + periodDefs.map((p) => p.label).join(' | ') + ' |', '|---|' + periodDefs.map(() => '---').join('|') + '|', ...rows.map((row) => `| ${row.label} | ${periodDefs.map((p) => row.cells[p.label].display).join(' | ')} |`), '', 'Notes: Monetary figures are in USD when available. N/A means the required source line item was not found or could not be defensibly computed. EBITDA is approximated only when operating income and depreciation/amortization are available. Market cap remains N/A unless a free public price source and share count are available.'].join('\\n');\nstate.financial_snapshot = { generated_at: now, currency: 'USD', periods: periodDefs, rows, markdown };\nstate.sections = state.sections || {};\nstate.sections.s2_snapshot = markdown;\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_FINANCIAL_SNAPSHOT', status: 'OK', message: 'Exact founder financial snapshot table prepared with N/A gaps where data is unavailable.' });\nreturn [{ json: state }];"
+      }
+    }
+  ],
+  "connections": {
+    "Subworkflow Input": {
+      "main": [
+        [
+          {
+            "node": "Build Exact Financial Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "b4afb264-576d-4c75-9fba-02681c8be07c",
+  "activeVersionId": "b4afb264-576d-4c75-9fba-02681c8be07c",
+  "versionCounter": 1,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-26T17:06:58.054Z",
+      "createdAt": "2026-06-26T17:06:58.054Z",
+      "role": "workflow:owner",
+      "workflowId": "uCs3FRw2T3nplPIE",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-06-26T17:06:58.056Z",
+    "createdAt": "2026-06-26T17:06:58.056Z",
+    "versionId": "b4afb264-576d-4c75-9fba-02681c8be07c",
+    "workflowId": "uCs3FRw2T3nplPIE",
+    "nodes": [
+      {
+        "id": "trigger",
+        "name": "Subworkflow Input",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "snapshot",
+        "name": "Build Exact Financial Snapshot",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          280,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nconst facts = state.research?.financials?.raw_us_gaap_facts || {};\nconst metrics = state.normalized?.metrics || {};\nfunction tagRows(tags) {\n  for (const tag of tags) {\n    const fact = facts[tag];\n    if (!fact?.units) continue;\n    const rows = Object.values(fact.units).flat().filter((row) => row && row.val !== undefined);\n    if (rows.length) return { tag, rows };\n  }\n  return { tag: tags[0], rows: [] };\n}\nconst tagMap = {\n  revenue: ['RevenueFromContractWithCustomerExcludingAssessedTax','Revenues','SalesRevenueNet'],\n  gross_profit: ['GrossProfit'],\n  operating_income: ['OperatingIncomeLoss'],\n  net_income: ['NetIncomeLoss','ProfitLoss'],\n  depreciation_amortization: ['DepreciationDepletionAndAmortization','DepreciationDepletionAndAmortizationExpense','DepreciationAndAmortization'],\n  diluted_eps: ['EarningsPerShareDiluted'],\n  long_term_debt: ['LongTermDebtAndFinanceLeaseObligationsNoncurrent','LongTermDebtNoncurrent','LongTermDebtAndFinanceLeaseObligationsCurrent'],\n  operating_cash_flow: ['NetCashProvidedByUsedInOperatingActivities','NetCashProvidedByUsedInOperatingActivitiesContinuingOperations'],\n  capex: ['PaymentsToAcquirePropertyPlantAndEquipment','PaymentsToAcquireProductiveAssets']\n};\nfunction source(row, tag, formula) {\n  return { source_name: `SEC EDGAR Company Facts:${tag}`, source_url: state.research?.financials?.source_url || '', source_date: row?.filed || now, source_section: row?.form || 'companyfacts', formula: formula || null, confidence: row ? 'HIGH' : 'N/A' };\n}\nfunction latestBy(rows, predicate) {\n  return rows.filter(predicate).sort((a,b) => String(a.end || '').localeCompare(String(b.end || '')) || String(a.filed || '').localeCompare(String(b.filed || ''))).at(-1) || null;\n}\nfunction annual(tagKey, fy) {\n  const found = tagRows(tagMap[tagKey] || [tagKey]);\n  const row = latestBy(found.rows, (r) => r.form === '10-K' && Number(r.fy) === Number(fy));\n  return row ? { value: row.val, unit: inferUnit(tagKey), period: `FY${fy}`, fiscal_label: `FY${fy}`, ...source(row, found.tag) } : null;\n}\nfunction quarterly(tagKey, q) {\n  if (!q) return null;\n  const found = tagRows(tagMap[tagKey] || [tagKey]);\n  const row = latestBy(found.rows, (r) => r.form === '10-Q' && Number(r.fy) === Number(q.fy) && String(r.fp) === String(q.fp));\n  return row ? { value: row.val, unit: inferUnit(tagKey), period: `${q.fp} FY${q.fy}`, fiscal_label: `${q.fp} FY${q.fy}`, ...source(row, found.tag) } : null;\n}\nfunction inferUnit(key) { return key === 'diluted_eps' ? 'USD/share' : 'USD'; }\nfunction qPeriods() {\n  const found = tagRows(tagMap.revenue);\n  const rows = found.rows.filter((r) => r.form === '10-Q' && r.fy && r.fp).sort((a,b) => String(a.end || '').localeCompare(String(b.end || '')) || String(a.filed || '').localeCompare(String(b.filed || '')));\n  const unique = [];\n  for (const row of rows) {\n    const key = `${row.fy}-${row.fp}`;\n    if (!unique.some((p) => p.key === key)) unique.push({ key, fy: row.fy, fp: row.fp, end: row.end });\n  }\n  const latest = unique.at(-1) || null;\n  const previous = unique.at(-2) || null;\n  const sameLastYear = latest ? unique.find((p) => Number(p.fy) === Number(latest.fy) - 1 && p.fp === latest.fp) || null : null;\n  return { latest, previous, sameLastYear };\n}\nfunction computed(name, inputs, fn, unit, formula) {\n  if (inputs.some((x) => !x || x.value === undefined || x.value === null) || (inputs[1] && Number(inputs[1].value) === 0)) return null;\n  return { value: fn(...inputs.map((x) => Number(x.value))), unit, period: inputs[0].period, fiscal_label: inputs[0].fiscal_label, source_name: inputs.map((x) => x.source_name).join(' + '), source_url: inputs.map((x) => x.source_url).filter(Boolean).join(' | '), source_date: inputs.map((x) => x.source_date).filter(Boolean).sort().at(-1) || now, source_section: 'computed', formula, confidence: inputs.every((x) => x.confidence === 'HIGH') ? 'HIGH' : 'MEDIUM' };\n}\nfunction formatCell(cell) {\n  if (!cell) return { display: 'N/A', value: null, reason: 'Required source line item was not available.', confidence: 'N/A' };\n  return { display: `${cell.value} ${cell.unit || ''}`.trim(), ...cell };\n}\nconst qp = qPeriods();\nconst periodDefs = [\n  { key: 'latest_quarter', label: 'Latest Reported Quarter', type: 'quarter', q: qp.latest },\n  { key: 'previous_quarter', label: 'Previous Quarter', type: 'quarter', q: qp.previous },\n  { key: 'same_quarter_last_year', label: 'Same Quarter Last Year', type: 'quarter', q: qp.sameLastYear },\n  ...[2025,2024,2023,2022,2021].map((fy) => ({ key: String(fy), label: String(fy), type: 'annual', fy }))\n];\nfunction baseMetric(metric, period) { return period.type === 'quarter' ? quarterly(metric, period.q) : annual(metric, period.fy); }\nfunction metricFor(rowId, period) {\n  const revenue = baseMetric('revenue', period);\n  if (rowId === 'revenue') return revenue;\n  if (rowId === 'operating_margin') return computed(rowId, [baseMetric('operating_income', period), revenue], (op, rev) => op / rev, 'ratio', 'Operating income / revenue');\n  if (rowId === 'net_margin') return computed(rowId, [baseMetric('net_income', period), revenue], (ni, rev) => ni / rev, 'ratio', 'Net income / revenue');\n  if (rowId === 'ebitda') {\n    const op = baseMetric('operating_income', period); const da = baseMetric('depreciation_amortization', period);\n    return computed(rowId, [op, da], (a,b) => a + b, 'USD', 'Approximate EBITDA = operating income + depreciation and amortization');\n  }\n  if (rowId === 'eps') return baseMetric('diluted_eps', period);\n  if (rowId === 'long_term_debt') return baseMetric('long_term_debt', period);\n  if (rowId === 'free_cash_flow') return computed(rowId, [baseMetric('operating_cash_flow', period), baseMetric('capex', period)], (ocf, capex) => ocf - capex, 'USD', 'Operating cash flow - capital expenditures');\n  if (rowId === 'market_cap') return null;\n  return null;\n}\nconst rowDefs = [\n  ['revenue','Revenue'], ['operating_margin','Operating Margin'], ['net_margin','Net Margin'], ['ebitda','EBITDA'], ['eps','EPS (diluted if available)'], ['long_term_debt','Long-term Debt'], ['free_cash_flow','Free Cash Flow (FCF)'], ['market_cap','Market Cap']\n];\nconst rows = rowDefs.map(([id,label]) => ({ metric: id, label, cells: Object.fromEntries(periodDefs.map((p) => [p.label, formatCell(metricFor(id, p))])) }));\nconst markdown = ['## Section 2: Financial Snapshot Table (USD)', '', '| Metric | ' + periodDefs.map((p) => p.label).join(' | ') + ' |', '|---|' + periodDefs.map(() => '---').join('|') + '|', ...rows.map((row) => `| ${row.label} | ${periodDefs.map((p) => row.cells[p.label].display).join(' | ')} |`), '', 'Notes: Monetary figures are in USD when available. N/A means the required source line item was not found or could not be defensibly computed. EBITDA is approximated only when operating income and depreciation/amortization are available. Market cap remains N/A unless a free public price source and share count are available.'].join('\\n');\nstate.financial_snapshot = { generated_at: now, currency: 'USD', periods: periodDefs, rows, markdown };\nstate.sections = state.sections || {};\nstate.sections.s2_snapshot = markdown;\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_FINANCIAL_SNAPSHOT', status: 'OK', message: 'Exact founder financial snapshot table prepared with N/A gaps where data is unavailable.' });\nreturn [{ json: state }];"
+        }
+      }
+    ],
+    "connections": {
+      "Subworkflow Input": {
+        "main": [
+          [
+            {
+              "node": "Build Exact Financial Snapshot",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Abdullah  Dilshad",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-26T17:11:19.489Z",
+        "id": 261,
+        "workflowId": "uCs3FRw2T3nplPIE",
+        "versionId": "b4afb264-576d-4c75-9fba-02681c8be07c",
+        "event": "activated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    ]
+  }
+}

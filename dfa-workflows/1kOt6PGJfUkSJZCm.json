@@ -1,0 +1,162 @@
+{
+  "updatedAt": "2026-06-24T18:32:21.413Z",
+  "createdAt": "2026-06-24T10:34:03.299Z",
+  "id": "1kOt6PGJfUkSJZCm",
+  "name": "DFA - WF_ERROR_AUDIT",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Subworkflow Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "logic",
+      "name": "Normalize Error Audit Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const input = items[0]?.json || {};\nconst state = input.state || input;\nconst now = new Date().toISOString();\nconst event = {\n  run_id: state.run_id || input.run_id || 'unknown',\n  timestamp: now,\n  workflow_name: input.workflow_name || input.execution?.workflowName || 'unknown_workflow',\n  event_type: input.event_type || 'error',\n  status: input.status || 'ERROR',\n  message: input.message || input.error?.message || 'Unhandled workflow error',\n  payload_json: JSON.stringify(input.error || input).slice(0, 5000)\n};\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push(event);\nstate.delivery = state.delivery || {};\nstate.delivery.status = 'failed';\nreturn [{ json: { state, audit_event: event } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Subworkflow Input": {
+      "main": [
+        [
+          {
+            "node": "Normalize Error Audit Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Karachi",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "executionTimeout": 300,
+    "saveExecutionProgress": false
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "727ada1b-340a-46c9-af3d-4e3908b6cbfb",
+  "activeVersionId": "727ada1b-340a-46c9-af3d-4e3908b6cbfb",
+  "versionCounter": 2,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-24T10:34:03.301Z",
+      "createdAt": "2026-06-24T10:34:03.301Z",
+      "role": "workflow:owner",
+      "workflowId": "1kOt6PGJfUkSJZCm",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-06-24T11:25:52.602Z",
+      "createdAt": "2026-06-24T11:25:52.602Z",
+      "id": "PvqNmKlzG0X72TtP",
+      "name": "DFA Analyst System"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-06-24T10:34:03.302Z",
+    "createdAt": "2026-06-24T10:34:03.302Z",
+    "versionId": "727ada1b-340a-46c9-af3d-4e3908b6cbfb",
+    "workflowId": "1kOt6PGJfUkSJZCm",
+    "nodes": [
+      {
+        "id": "trigger",
+        "name": "Subworkflow Input",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "inputSource": "passthrough"
+        }
+      },
+      {
+        "id": "logic",
+        "name": "Normalize Error Audit Event",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          260,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const input = items[0]?.json || {};\nconst state = input.state || input;\nconst now = new Date().toISOString();\nconst event = {\n  run_id: state.run_id || input.run_id || 'unknown',\n  timestamp: now,\n  workflow_name: input.workflow_name || input.execution?.workflowName || 'unknown_workflow',\n  event_type: input.event_type || 'error',\n  status: input.status || 'ERROR',\n  message: input.message || input.error?.message || 'Unhandled workflow error',\n  payload_json: JSON.stringify(input.error || input).slice(0, 5000)\n};\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push(event);\nstate.delivery = state.delivery || {};\nstate.delivery.status = 'failed';\nreturn [{ json: { state, audit_event: event } }];"
+        }
+      }
+    ],
+    "connections": {
+      "Subworkflow Input": {
+        "main": [
+          [
+            {
+              "node": "Normalize Error Audit Event",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Abdullah  Dilshad",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-24T18:32:22.397Z",
+        "id": 187,
+        "workflowId": "1kOt6PGJfUkSJZCm",
+        "versionId": "727ada1b-340a-46c9-af3d-4e3908b6cbfb",
+        "event": "activated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    ]
+  }
+}

@@ -1,0 +1,162 @@
+{
+  "updatedAt": "2026-06-24T18:32:12.036Z",
+  "createdAt": "2026-06-24T10:33:27.753Z",
+  "id": "MhFxSrdHKqi4LkE5",
+  "name": "DFA - WF_NORMALIZE",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Subworkflow Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "logic",
+      "name": "Normalize Source Tagged Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nconst research = state.research || {};\nconst usGaap = research.financials?.raw_us_gaap_facts || {};\nstate.normalized = state.normalized || { periods: [], metrics: {}, gaps: [], reliability_map: {}, formulas: {} };\nstate.normalized.metrics = state.normalized.metrics || {};\nstate.normalized.gaps = state.normalized.gaps || [];\nfunction sourceUrl() { return research.financials?.source_url || ''; }\nfunction factCandidates(names) {\n  for (const name of names) {\n    const fact = usGaap[name];\n    if (!fact?.units) continue;\n    const units = fact.units.USD || fact.units.shares || fact.units['USD/shares'] || Object.values(fact.units)[0] || [];\n    if (Array.isArray(units) && units.length) return { tag: name, units };\n  }\n  return null;\n}\nfunction annualSeries(metricName, names, unit = 'USD') {\n  const candidate = factCandidates(names);\n  if (!candidate) {\n    addGap(metricName, `No supported SEC XBRL tag found. Tried: ${names.join(', ')}`);\n    return [];\n  }\n  const byEnd = candidate.units\n    .filter((row) => row.val !== undefined && row.form === '10-K')\n    .reduce((map, row) => {\n      const key = row.end || `${row.fy}-${row.fp}-${row.frame || ''}`;\n      const existing = map.get(key);\n      if (!existing || String(row.filed || '') > String(existing.filed || '')) map.set(key, row);\n      return map;\n    }, new Map());\n  const series = Array.from(byEnd.values())\n    .map((row) => ({\n      value: row.val,\n      unit,\n      period: row.frame || (row.fy ? `FY${row.fy}` : row.end),\n      fiscal_label: row.fp || 'FY',\n      source_name: `SEC EDGAR Company Facts:${candidate.tag}`,\n      source_url: sourceUrl(),\n      source_date: row.filed || now,\n      source_section: row.form || 'companyfacts',\n      confidence: 'HIGH',\n      notes: row.end || row.frame || '',\n      is_estimate: false\n    }))\n    .sort((a, b) => String(a.notes || a.period).localeCompare(String(b.notes || b.period)))\n    .slice(-5);\n  if (!series.length) addGap(metricName, `SEC tag ${candidate.tag} exists but has no annual 10-K values.`);\n  return series;\n}\nfunction addGap(metric, reason) {\n  if (!state.normalized.gaps.some((gap) => gap.metric === metric && gap.reason === reason)) {\n    state.normalized.gaps.push({ metric, reason, source: 'WF_NORMALIZE', timestamp: now });\n  }\n}\nfunction latest(series) { return Array.isArray(series) ? series[series.length - 1] : null; }\nfunction computedValue(metric, value, unit, sources, notes) {\n  return {\n    value,\n    unit,\n    period: sources[0]?.period || 'latest',\n    fiscal_label: sources[0]?.fiscal_label || '',\n    source_name: sources.map((s) => s.source_name).join(' + '),\n    source_url: sources.map((s) => s.source_url).filter(Boolean).join(' | '),\n    source_date: sources.map((s) => s.source_date).filter(Boolean).sort().slice(-1)[0] || now,\n    source_section: 'computed',\n    confidence: sources.every((s) => s.confidence === 'HIGH') ? 'HIGH' : 'MEDIUM',\n    notes,\n    is_estimate: sources.some((s) => s.is_estimate)\n  };\n}\nconst canonical = {\n  revenue: annualSeries('revenue', ['RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet']),\n  gross_profit: annualSeries('gross_profit', ['GrossProfit']),\n  operating_income: annualSeries('operating_income', ['OperatingIncomeLoss']),\n  net_income: annualSeries('net_income', ['NetIncomeLoss', 'ProfitLoss']),\n  operating_cash_flow: annualSeries('operating_cash_flow', ['NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations']),\n  capex: annualSeries('capex', ['PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets']),\n  long_term_debt: annualSeries('long_term_debt', ['LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent', 'LongTermDebtAndFinanceLeaseObligationsCurrent']),\n  current_assets: annualSeries('current_assets', ['AssetsCurrent']),\n  current_liabilities: annualSeries('current_liabilities', ['LiabilitiesCurrent']),\n  interest_expense: annualSeries('interest_expense', ['InterestExpenseNonOperating', 'InterestExpense']),\n  diluted_eps: annualSeries('diluted_eps', ['EarningsPerShareDiluted'], 'USD/share'),\n  diluted_shares: annualSeries('diluted_shares', ['WeightedAverageNumberOfDilutedSharesOutstanding', 'WeightedAverageNumberOfSharesOutstandingDiluted'], 'shares')\n};\nconst lRevenue = latest(canonical.revenue);\nconst lOpIncome = latest(canonical.operating_income);\nconst lOcf = latest(canonical.operating_cash_flow);\nconst lCapex = latest(canonical.capex);\nconst lGrossProfit = latest(canonical.gross_profit);\nconst lNetIncome = latest(canonical.net_income);\nconst lCurrentAssets = latest(canonical.current_assets);\nconst lCurrentLiabilities = latest(canonical.current_liabilities);\nif (lOcf && lCapex) canonical.free_cash_flow = [computedValue('free_cash_flow', lOcf.value - lCapex.value, 'USD', [lOcf, lCapex], 'Computed as operating cash flow minus capex.')];\nelse addGap('free_cash_flow', 'Requires operating cash flow and capex.');\nif (lRevenue && lOpIncome && lRevenue.value) canonical.operating_margin = [computedValue('operating_margin', lOpIncome.value / lRevenue.value, 'ratio', [lOpIncome, lRevenue], 'Computed as operating income divided by revenue.')];\nelse addGap('operating_margin', 'Requires revenue and operating income.');\nif (lRevenue && lGrossProfit && lRevenue.value) canonical.gross_margin = [computedValue('gross_margin', lGrossProfit.value / lRevenue.value, 'ratio', [lGrossProfit, lRevenue], 'Computed as gross profit divided by revenue.')];\nelse addGap('gross_margin', 'Requires revenue and gross profit.');\nif (lRevenue && lNetIncome && lRevenue.value) canonical.net_margin = [computedValue('net_margin', lNetIncome.value / lRevenue.value, 'ratio', [lNetIncome, lRevenue], 'Computed as net income divided by revenue.')];\nelse addGap('net_margin', 'Requires revenue and net income.');\nif (lCurrentAssets && lCurrentLiabilities && lCurrentLiabilities.value) canonical.current_ratio = [computedValue('current_ratio', lCurrentAssets.value / lCurrentLiabilities.value, 'ratio', [lCurrentAssets, lCurrentLiabilities], 'Computed as current assets divided by current liabilities.')];\nelse addGap('current_ratio', 'Requires current assets and current liabilities.');\nstate.normalized.metrics = { ...state.normalized.metrics, ...canonical };\nstate.normalized.periods = [...new Set(Object.values(state.normalized.metrics).flat().filter(Boolean).map((m) => m.period))].sort();\nstate.normalized.formulas = {\n  fcf: 'Cash from operations - capital expenditures',\n  operating_margin: 'Operating income / revenue',\n  gross_margin: 'Gross profit / revenue',\n  net_margin: 'Net income / revenue',\n  fcf_margin: 'Free cash flow / revenue',\n  current_ratio: 'Current assets / current liabilities',\n  interest_coverage: 'EBIT / interest expense',\n  roce: 'EBIT / capital employed'\n};\nstate.normalized.reliability_map = {\n  public_company_xbrl: research.financials?.confidence || 'N/A',\n  filings: research.filings?.confidence || 'N/A',\n  peer_metrics: research.peer_jobs?.confidence || 'PENDING',\n  market_data: research.market_data_jobs?.confidence || 'PENDING',\n  news_events: research.news_event_jobs?.confidence || 'PENDING',\n  default_rules: {\n    'public+edgar+recent': 'HIGH',\n    'public+third_party_api': 'MEDIUM',\n    'private+press_release': 'LOW',\n    'private+estimate': 'VERY_LOW'\n  }\n};\nstate.normalized.source_coverage = {\n  metrics_with_values: Object.entries(state.normalized.metrics).filter(([, v]) => Array.isArray(v) && v.length).length,\n  gap_count: state.normalized.gaps.length,\n  sources_used: [...new Set(Object.values(state.normalized.metrics).flat().filter(Boolean).map((m) => m.source_name))]\n};\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_NORMALIZE', status: 'OK', message: `Normalized ${state.normalized.source_coverage.metrics_with_values} metric groups with ${state.normalized.gaps.length} gaps.` });\nreturn [{ json: state }];"
+      }
+    }
+  ],
+  "connections": {
+    "Subworkflow Input": {
+      "main": [
+        [
+          {
+            "node": "Normalize Source Tagged Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Karachi",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "executionTimeout": 300,
+    "saveExecutionProgress": false
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "8690606c-1996-4586-bf9b-88218e3deffe",
+  "activeVersionId": "8690606c-1996-4586-bf9b-88218e3deffe",
+  "versionCounter": 3,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-24T10:33:27.755Z",
+      "createdAt": "2026-06-24T10:33:27.755Z",
+      "role": "workflow:owner",
+      "workflowId": "MhFxSrdHKqi4LkE5",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-06-24T11:25:52.602Z",
+      "createdAt": "2026-06-24T11:25:52.602Z",
+      "id": "PvqNmKlzG0X72TtP",
+      "name": "DFA Analyst System"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-06-24T10:57:37.695Z",
+    "createdAt": "2026-06-24T10:57:37.695Z",
+    "versionId": "8690606c-1996-4586-bf9b-88218e3deffe",
+    "workflowId": "MhFxSrdHKqi4LkE5",
+    "nodes": [
+      {
+        "id": "trigger",
+        "name": "Subworkflow Input",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "inputSource": "passthrough"
+        }
+      },
+      {
+        "id": "logic",
+        "name": "Normalize Source Tagged Data",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          260,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nconst research = state.research || {};\nconst usGaap = research.financials?.raw_us_gaap_facts || {};\nstate.normalized = state.normalized || { periods: [], metrics: {}, gaps: [], reliability_map: {}, formulas: {} };\nstate.normalized.metrics = state.normalized.metrics || {};\nstate.normalized.gaps = state.normalized.gaps || [];\nfunction sourceUrl() { return research.financials?.source_url || ''; }\nfunction factCandidates(names) {\n  for (const name of names) {\n    const fact = usGaap[name];\n    if (!fact?.units) continue;\n    const units = fact.units.USD || fact.units.shares || fact.units['USD/shares'] || Object.values(fact.units)[0] || [];\n    if (Array.isArray(units) && units.length) return { tag: name, units };\n  }\n  return null;\n}\nfunction annualSeries(metricName, names, unit = 'USD') {\n  const candidate = factCandidates(names);\n  if (!candidate) {\n    addGap(metricName, `No supported SEC XBRL tag found. Tried: ${names.join(', ')}`);\n    return [];\n  }\n  const byEnd = candidate.units\n    .filter((row) => row.val !== undefined && row.form === '10-K')\n    .reduce((map, row) => {\n      const key = row.end || `${row.fy}-${row.fp}-${row.frame || ''}`;\n      const existing = map.get(key);\n      if (!existing || String(row.filed || '') > String(existing.filed || '')) map.set(key, row);\n      return map;\n    }, new Map());\n  const series = Array.from(byEnd.values())\n    .map((row) => ({\n      value: row.val,\n      unit,\n      period: row.frame || (row.fy ? `FY${row.fy}` : row.end),\n      fiscal_label: row.fp || 'FY',\n      source_name: `SEC EDGAR Company Facts:${candidate.tag}`,\n      source_url: sourceUrl(),\n      source_date: row.filed || now,\n      source_section: row.form || 'companyfacts',\n      confidence: 'HIGH',\n      notes: row.end || row.frame || '',\n      is_estimate: false\n    }))\n    .sort((a, b) => String(a.notes || a.period).localeCompare(String(b.notes || b.period)))\n    .slice(-5);\n  if (!series.length) addGap(metricName, `SEC tag ${candidate.tag} exists but has no annual 10-K values.`);\n  return series;\n}\nfunction addGap(metric, reason) {\n  if (!state.normalized.gaps.some((gap) => gap.metric === metric && gap.reason === reason)) {\n    state.normalized.gaps.push({ metric, reason, source: 'WF_NORMALIZE', timestamp: now });\n  }\n}\nfunction latest(series) { return Array.isArray(series) ? series[series.length - 1] : null; }\nfunction computedValue(metric, value, unit, sources, notes) {\n  return {\n    value,\n    unit,\n    period: sources[0]?.period || 'latest',\n    fiscal_label: sources[0]?.fiscal_label || '',\n    source_name: sources.map((s) => s.source_name).join(' + '),\n    source_url: sources.map((s) => s.source_url).filter(Boolean).join(' | '),\n    source_date: sources.map((s) => s.source_date).filter(Boolean).sort().slice(-1)[0] || now,\n    source_section: 'computed',\n    confidence: sources.every((s) => s.confidence === 'HIGH') ? 'HIGH' : 'MEDIUM',\n    notes,\n    is_estimate: sources.some((s) => s.is_estimate)\n  };\n}\nconst canonical = {\n  revenue: annualSeries('revenue', ['RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet']),\n  gross_profit: annualSeries('gross_profit', ['GrossProfit']),\n  operating_income: annualSeries('operating_income', ['OperatingIncomeLoss']),\n  net_income: annualSeries('net_income', ['NetIncomeLoss', 'ProfitLoss']),\n  operating_cash_flow: annualSeries('operating_cash_flow', ['NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations']),\n  capex: annualSeries('capex', ['PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets']),\n  long_term_debt: annualSeries('long_term_debt', ['LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent', 'LongTermDebtAndFinanceLeaseObligationsCurrent']),\n  current_assets: annualSeries('current_assets', ['AssetsCurrent']),\n  current_liabilities: annualSeries('current_liabilities', ['LiabilitiesCurrent']),\n  interest_expense: annualSeries('interest_expense', ['InterestExpenseNonOperating', 'InterestExpense']),\n  diluted_eps: annualSeries('diluted_eps', ['EarningsPerShareDiluted'], 'USD/share'),\n  diluted_shares: annualSeries('diluted_shares', ['WeightedAverageNumberOfDilutedSharesOutstanding', 'WeightedAverageNumberOfSharesOutstandingDiluted'], 'shares')\n};\nconst lRevenue = latest(canonical.revenue);\nconst lOpIncome = latest(canonical.operating_income);\nconst lOcf = latest(canonical.operating_cash_flow);\nconst lCapex = latest(canonical.capex);\nconst lGrossProfit = latest(canonical.gross_profit);\nconst lNetIncome = latest(canonical.net_income);\nconst lCurrentAssets = latest(canonical.current_assets);\nconst lCurrentLiabilities = latest(canonical.current_liabilities);\nif (lOcf && lCapex) canonical.free_cash_flow = [computedValue('free_cash_flow', lOcf.value - lCapex.value, 'USD', [lOcf, lCapex], 'Computed as operating cash flow minus capex.')];\nelse addGap('free_cash_flow', 'Requires operating cash flow and capex.');\nif (lRevenue && lOpIncome && lRevenue.value) canonical.operating_margin = [computedValue('operating_margin', lOpIncome.value / lRevenue.value, 'ratio', [lOpIncome, lRevenue], 'Computed as operating income divided by revenue.')];\nelse addGap('operating_margin', 'Requires revenue and operating income.');\nif (lRevenue && lGrossProfit && lRevenue.value) canonical.gross_margin = [computedValue('gross_margin', lGrossProfit.value / lRevenue.value, 'ratio', [lGrossProfit, lRevenue], 'Computed as gross profit divided by revenue.')];\nelse addGap('gross_margin', 'Requires revenue and gross profit.');\nif (lRevenue && lNetIncome && lRevenue.value) canonical.net_margin = [computedValue('net_margin', lNetIncome.value / lRevenue.value, 'ratio', [lNetIncome, lRevenue], 'Computed as net income divided by revenue.')];\nelse addGap('net_margin', 'Requires revenue and net income.');\nif (lCurrentAssets && lCurrentLiabilities && lCurrentLiabilities.value) canonical.current_ratio = [computedValue('current_ratio', lCurrentAssets.value / lCurrentLiabilities.value, 'ratio', [lCurrentAssets, lCurrentLiabilities], 'Computed as current assets divided by current liabilities.')];\nelse addGap('current_ratio', 'Requires current assets and current liabilities.');\nstate.normalized.metrics = { ...state.normalized.metrics, ...canonical };\nstate.normalized.periods = [...new Set(Object.values(state.normalized.metrics).flat().filter(Boolean).map((m) => m.period))].sort();\nstate.normalized.formulas = {\n  fcf: 'Cash from operations - capital expenditures',\n  operating_margin: 'Operating income / revenue',\n  gross_margin: 'Gross profit / revenue',\n  net_margin: 'Net income / revenue',\n  fcf_margin: 'Free cash flow / revenue',\n  current_ratio: 'Current assets / current liabilities',\n  interest_coverage: 'EBIT / interest expense',\n  roce: 'EBIT / capital employed'\n};\nstate.normalized.reliability_map = {\n  public_company_xbrl: research.financials?.confidence || 'N/A',\n  filings: research.filings?.confidence || 'N/A',\n  peer_metrics: research.peer_jobs?.confidence || 'PENDING',\n  market_data: research.market_data_jobs?.confidence || 'PENDING',\n  news_events: research.news_event_jobs?.confidence || 'PENDING',\n  default_rules: {\n    'public+edgar+recent': 'HIGH',\n    'public+third_party_api': 'MEDIUM',\n    'private+press_release': 'LOW',\n    'private+estimate': 'VERY_LOW'\n  }\n};\nstate.normalized.source_coverage = {\n  metrics_with_values: Object.entries(state.normalized.metrics).filter(([, v]) => Array.isArray(v) && v.length).length,\n  gap_count: state.normalized.gaps.length,\n  sources_used: [...new Set(Object.values(state.normalized.metrics).flat().filter(Boolean).map((m) => m.source_name))]\n};\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_NORMALIZE', status: 'OK', message: `Normalized ${state.normalized.source_coverage.metrics_with_values} metric groups with ${state.normalized.gaps.length} gaps.` });\nreturn [{ json: state }];"
+        }
+      }
+    ],
+    "connections": {
+      "Subworkflow Input": {
+        "main": [
+          [
+            {
+              "node": "Normalize Source Tagged Data",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Abdullah  Dilshad",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-24T18:32:13.011Z",
+        "id": 184,
+        "workflowId": "MhFxSrdHKqi4LkE5",
+        "versionId": "8690606c-1996-4586-bf9b-88218e3deffe",
+        "event": "activated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    ]
+  }
+}
