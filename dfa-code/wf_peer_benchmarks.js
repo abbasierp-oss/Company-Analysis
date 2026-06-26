@@ -38,7 +38,7 @@ function companyRowFromAnchors() {
   const metrics = {};
   for (const key of metricLabels) {
     const val = computed[key];
-    metrics[key] = val && val !== 'N/A' ? `${val} (${label})` : 'N/A';
+    metrics[key] = val && !isUnavailableDisplay(val) ? `${val} (${label})` : naReason(`${key} not available for target company FY${benchmarkFy}`);
   }
   return {
     name: company,
@@ -53,9 +53,9 @@ const peers = [];
 for (let i = 0; i < peerNames.length; i++) {
   const name = peerNames[i];
   const role = i === 0 ? 'best-in-class or scale benchmark' : (i === 1 ? 'close competitor' : 'industry peer');
-  let metrics = Object.fromEntries(metricLabels.map((m) => [m, 'N/A']));
+  let metrics = Object.fromEntries(metricLabels.map((m) => [m, naReason('peer SEC data not yet fetched')]));
   let source_status = 'NO_SEC_MATCH';
-  let reliability = 'N/A';
+  let reliability = naReason('peer not matched in SEC directory');
   try {
     const { best, cik } = resolveCikFromDirectory(directory, name, '');
     if (cik) {
@@ -68,7 +68,7 @@ for (let i = 0; i < peerNames.length; i++) {
       const fy = [benchmarkFy, benchmarkFy - 1, benchmarkFy - 2].find((y) => annualFactValue(merged, 'revenue', y, peerFx, peerNative)) || benchmarkFy;
       const computed = computePeerMetricsFromFacts(merged, fy, peerFx, peerNative);
       for (const key of metricLabels) {
-        metrics[key] = computed[key] && computed[key] !== 'N/A' ? `${computed[key]} (FY${fy})` : 'N/A';
+        metrics[key] = computed[key] && !isUnavailableDisplay(computed[key]) ? `${computed[key]} (FY${fy})` : naReason(`${key} not available for ${name} FY${fy}`);
       }
       source_status = peerRowHasCoreMetrics(metrics) ? 'SEC_PEER_FACTS_OK' : 'SEC_PEER_INCOMPLETE';
       reliability = peerRowHasCoreMetrics(metrics) ? 'HIGH' : 'LOW';
@@ -100,17 +100,7 @@ if (tablePublished) {
     'Interpretation: peer metrics are computed consistently from SEC EDGAR line items for the same annual period. Margins and ratios are derived only when all required inputs exist on company facts.',
   ].join('\n');
 } else {
-  markdown = [
-    '## Section 3: Peer Comparison & Benchmarking',
-    '',
-    'Peer comparison withheld until all core metrics can be populated consistently.',
-    '',
-    `Required core metrics (${fyLabel}): ${CORE_PEER_METRICS.join(', ')}.`,
-    `Target core metrics complete: ${peerRowHasCoreMetrics(companyRow.metrics) ? 'yes' : 'no'}.`,
-    `Peers with complete core metrics: ${peersWithCore.length}/${peers.length}.`,
-    '',
-    'Re-run with explicit peer overrides or wait for fuller SEC fact coverage before using peer benchmarks in decisions.',
-  ].join('\n');
+  markdown = null;
 }
 
 state.peer_benchmarks = {
@@ -121,9 +111,14 @@ state.peer_benchmarks = {
   peers,
   company_row: companyRow,
   markdown,
+  withhold_reason: tablePublished ? null : `Peer comparison omitted — only ${peersWithCore.length} of ${peers.length} peers had complete core FY${benchmarkFy} metrics from SEC filings.`,
 };
 state.sections = state.sections || {};
-state.sections.s3_benchmarks = markdown;
+if (tablePublished && markdown) {
+  state.sections.s3_benchmarks = markdown;
+} else {
+  delete state.sections.s3_benchmarks;
+}
 state.audit_log = state.audit_log || [];
 state.audit_log.push({
   timestamp: now,

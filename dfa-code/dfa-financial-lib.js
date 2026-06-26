@@ -310,8 +310,18 @@ function computeEntityMetrics(facts, sourceMeta, fx) {
   };
 }
 
-function fmtUsdValue(v) {
-  if (v === null || v === undefined || Number.isNaN(v)) return 'N/A';
+function naReason(detail) {
+  return `Not available — ${detail}`;
+}
+
+function isUnavailableDisplay(v) {
+  return v === null || v === undefined || Number.isNaN(v) || v === 'N/A' || String(v).startsWith('Not available');
+}
+
+function fmtUsdValue(v, unavailableReason) {
+  if (v === null || v === undefined || Number.isNaN(v)) {
+    return unavailableReason || naReason('USD amount not reported on the anchored SEC filing');
+  }
   const abs = Math.abs(Number(v));
   if (abs >= 1e12) return `$${(Number(v) / 1e12).toFixed(2)}T`;
   if (abs >= 1e9) return `$${(Number(v) / 1e9).toFixed(2)}B`;
@@ -320,18 +330,24 @@ function fmtUsdValue(v) {
   return `$${Number(v).toFixed(2)}`;
 }
 
-function fmtPct(v, decimals = 1) {
-  if (v === null || v === undefined || Number.isNaN(v)) return 'N/A';
+function fmtPct(v, decimals = 1, unavailableReason) {
+  if (v === null || v === undefined || Number.isNaN(v)) {
+    return unavailableReason || naReason('percentage not computable from anchored filing inputs');
+  }
   return `${(Number(v) * 100).toFixed(decimals)}%`;
 }
 
-function fmtRatio(v, decimals = 2) {
-  if (v === null || v === undefined || Number.isNaN(v)) return 'N/A';
+function fmtRatio(v, decimals = 2, unavailableReason) {
+  if (v === null || v === undefined || Number.isNaN(v)) {
+    return unavailableReason || naReason('ratio not computable because numerator or denominator is missing on the filing');
+  }
   return Number(v).toFixed(decimals);
 }
 
-function fmtEps(v) {
-  if (v === null || v === undefined || Number.isNaN(v)) return 'N/A';
+function fmtEps(v, unavailableReason) {
+  if (v === null || v === undefined || Number.isNaN(v)) {
+    return unavailableReason || naReason('EPS not reported on the anchored quarterly filing');
+  }
   return `$${Number(v).toFixed(2)}`;
 }
 
@@ -363,7 +379,7 @@ function resolveFilingAnchors(recentFilings, issuerProfile) {
 }
 
 function anchorPeriodLabel(anchor) {
-  if (!anchor) return 'N/A';
+  if (!anchor) return naReason('no filing anchor available');
   const fyStr = (fy) => {
     const s = String(fy);
     return s.startsWith('FY') ? s : `FY${s}`;
@@ -375,7 +391,7 @@ function anchorPeriodLabel(anchor) {
   }
   if (anchor.report_date) return anchor.report_date;
   if (anchor.fy) return fyStr(anchor.fy);
-  return anchor.filing_date || 'N/A';
+  return anchor.filing_date || naReason('filing date not recorded on anchor');
 }
 
 function annualSectionLabel(anchor) {
@@ -572,7 +588,10 @@ function getAnnualAnchorMetrics(state) {
 }
 
 function formatAnchoredMetricValue(metric, kind) {
-  if (!metric || metric.value === null || metric.value === undefined) return 'N/A';
+  if (!metric || metric.value === null || metric.value === undefined) {
+    const label = kind === 'pct' ? 'margin' : (kind === 'eps' ? 'EPS' : 'metric');
+    return naReason(`${label} not found on the anchored quarterly filing`);
+  }
   const flag = metric.one_time_flag ? ` ⚠ ${metric.one_time_flag}` : '';
   if (kind === 'pct' || metric.unit === 'ratio') return `${fmtPct(metric.value)}${flag}`;
   if (kind === 'eps' || metric.unit === 'USD/shares') return `${fmtEps(metric.value)}${flag}`;
@@ -633,15 +652,15 @@ function aggregateReportGaps(state) {
   if (state.peer_benchmarks && !state.peer_benchmarks.table_published) {
     gaps.push({
       metric: 'peer_benchmarks',
-      reason: 'Peer table withheld — core FY peer metrics incomplete across entities.',
+      reason: state.peer_benchmarks.withhold_reason || 'Peer comparison omitted — core FY peer metrics incomplete across entities.',
       source: 'WF_PEER_BENCHMARKS',
       timestamp: ts,
     });
   }
-  const qNa = (state.ratio_dashboard?.quarterly || []).filter((r) => r.value === 'N/A').length;
-  const aNa = (state.ratio_dashboard?.annual || []).flatMap((r) => r.values || []).filter((v) => v === 'N/A').length;
-  if (qNa > 0) gaps.push({ metric: 'quarterly_ratios', reason: `${qNa} quarterly ratio(s) N/A on anchored filing.`, source: 'WF_RATIO_DASHBOARD', timestamp: ts });
-  if (aNa > 0) gaps.push({ metric: 'annual_ratios', reason: `${aNa} annual ratio value(s) N/A.`, source: 'WF_RATIO_DASHBOARD', timestamp: ts });
+  const qNa = (state.ratio_dashboard?.quarterly || []).filter((r) => isUnavailableDisplay(r.value)).length;
+  const aNa = (state.ratio_dashboard?.annual || []).flatMap((r) => r.values || []).filter((v) => isUnavailableDisplay(v)).length;
+  if (qNa > 0) gaps.push({ metric: 'quarterly_ratios', reason: `${qNa} quarterly ratio(s) unavailable on anchored filing — see Section 5 for reasons.`, source: 'WF_RATIO_DASHBOARD', timestamp: ts });
+  if (aNa > 0) gaps.push({ metric: 'annual_ratios', reason: `${aNa} annual ratio value(s) unavailable — required line items missing.`, source: 'WF_RATIO_DASHBOARD', timestamp: ts });
   if (!state.research?.market_data?.market_cap_usd) {
     gaps.push({ metric: 'market_cap', reason: 'Computed market cap unavailable (requires Yahoo share price and SEC DEI shares outstanding).', source: 'WF_RESEARCH_PUBLIC', timestamp: ts });
   }
@@ -793,25 +812,26 @@ function computePeerMetricsFromFacts(facts, fy, fx, native) {
   const safeDiv = (a, b) => (a !== null && b !== null && b !== 0 ? a / b : null);
   const fcf = ocf !== null && capex !== null ? ocf - capex : null;
   const ebitda = op !== null && dep !== null ? op + dep : null;
+  const peerNa = (label) => naReason(`${label} not computable from SEC line items for FY${fy}`);
   return {
-    Revenue: revenue !== null ? fmtUsdValue(revenue) : 'N/A',
-    'Gross Margin': safeDiv(gross, revenue) !== null ? fmtPct(safeDiv(gross, revenue)) : 'N/A',
-    'Operating Margin': safeDiv(op, revenue) !== null ? fmtPct(safeDiv(op, revenue)) : 'N/A',
-    'Net Margin': safeDiv(net, revenue) !== null ? fmtPct(safeDiv(net, revenue)) : 'N/A',
-    'FCF Margin': safeDiv(fcf, revenue) !== null ? fmtPct(safeDiv(fcf, revenue)) : 'N/A',
-    'Current Ratio': safeDiv(ca, cl) !== null ? fmtRatio(safeDiv(ca, cl)) : 'N/A',
-    'YoY Revenue Growth': safeDiv(revenue && revY1 ? revenue - revY1 : null, revY1) !== null ? fmtPct(safeDiv(revenue - revY1, revY1)) : 'N/A',
-    '3-Year Revenue CAGR': revY3 && revenue && revY3 > 0 ? fmtPct(Math.pow(revenue / revY3, 1 / 3) - 1) : 'N/A',
-    'Net Debt / EBITDA': ebitda && debt !== null && cash !== null && ebitda !== 0 ? fmtRatio((debt - cash) / ebitda) : 'N/A',
-    'Interest Coverage': safeDiv(op, interest) !== null ? fmtRatio(safeDiv(op, interest)) : 'N/A',
-    'ROCE/ROIC': safeDiv(op, assets !== null && cl !== null ? assets - cl : null) !== null ? fmtPct(safeDiv(op, assets - cl)) : 'N/A',
-    'Asset Turnover': safeDiv(revenue, assets) !== null ? fmtRatio(safeDiv(revenue, assets)) : 'N/A',
+    Revenue: revenue !== null ? fmtUsdValue(revenue) : peerNa('Revenue'),
+    'Gross Margin': safeDiv(gross, revenue) !== null ? fmtPct(safeDiv(gross, revenue)) : peerNa('Gross margin'),
+    'Operating Margin': safeDiv(op, revenue) !== null ? fmtPct(safeDiv(op, revenue)) : peerNa('Operating margin'),
+    'Net Margin': safeDiv(net, revenue) !== null ? fmtPct(safeDiv(net, revenue)) : peerNa('Net margin'),
+    'FCF Margin': safeDiv(fcf, revenue) !== null ? fmtPct(safeDiv(fcf, revenue)) : peerNa('FCF margin'),
+    'Current Ratio': safeDiv(ca, cl) !== null ? fmtRatio(safeDiv(ca, cl)) : peerNa('Current ratio'),
+    'YoY Revenue Growth': safeDiv(revenue && revY1 ? revenue - revY1 : null, revY1) !== null ? fmtPct(safeDiv(revenue - revY1, revY1)) : peerNa('YoY revenue growth'),
+    '3-Year Revenue CAGR': revY3 && revenue && revY3 > 0 ? fmtPct(Math.pow(revenue / revY3, 1 / 3) - 1) : peerNa('3-year revenue CAGR'),
+    'Net Debt / EBITDA': ebitda && debt !== null && cash !== null && ebitda !== 0 ? fmtRatio((debt - cash) / ebitda) : peerNa('Net debt / EBITDA'),
+    'Interest Coverage': safeDiv(op, interest) !== null ? fmtRatio(safeDiv(op, interest)) : peerNa('Interest coverage'),
+    'ROCE/ROIC': safeDiv(op, assets !== null && cl !== null ? assets - cl : null) !== null ? fmtPct(safeDiv(op, assets - cl)) : peerNa('ROCE/ROIC'),
+    'Asset Turnover': safeDiv(revenue, assets) !== null ? fmtRatio(safeDiv(revenue, assets)) : peerNa('Asset turnover'),
     _fy: fy,
   };
 }
 
 function peerRowHasCoreMetrics(metrics) {
-  return CORE_PEER_METRICS.every((key) => metrics[key] && metrics[key] !== 'N/A');
+  return CORE_PEER_METRICS.every((key) => metrics[key] && !isUnavailableDisplay(metrics[key]));
 }
 
 function entityConfidence(entity, normalized) {
@@ -847,7 +867,7 @@ function parsePeerList(raw) {
 }
 
 function claudeBaseSystem(inputs, expert) {
-  return `You are an AI financial analyst who thinks like Aswath Damodaran. Evidence first. Every figure must come from the provided JSON only. Never fabricate numbers. If data is missing, write N/A and explain why. Show formulas for computed metrics. Do not use templating placeholders or curly-brace variables. Industry lens: ${expert?.name || inputs.expert_pref || 'industry expert'}. Executive audience: ${inputs.exec_type || 'executive'}. Service provider: ${inputs.service_provider || 'MY COMPANY'}.`;
+  return `You are an AI financial analyst preparing executive-ready analysis. Evidence first. Every figure must come from the provided JSON only. Never fabricate numbers. If data is missing, explain why instead of using bare N/A. Show formulas for computed metrics. Do not use templating placeholders or curly-brace variables. Industry lens: ${expert?.name || inputs.expert_pref || 'industry expert'}. Executive audience: ${inputs.exec_type || 'executive'}. Service provider: ${inputs.service_provider || 'MY COMPANY'}.`;
 }
 
 function parseClaudeJson(response) {
@@ -863,7 +883,7 @@ function buildDeterministicInsights(state) {
   const q = getQuarterlyAnchorMetrics(state);
   const period = q.period_label || 'Quarterly anchor';
   const qForm = state.data_freshness?.quarterly_anchor_form || '10-Q';
-  const qPeriod = q.reporting_period || state.data_freshness?.quarterly_anchor_report_date || 'N/A';
+  const qPeriod = q.reporting_period || state.data_freshness?.quarterly_anchor_report_date || naReason('quarterly report period not recorded');
   const issuer = state.entity?.issuer_profile?.description || 'public company';
   const ref8k = state.data_freshness?.recent_8k_form;
   const ref8kDate = state.data_freshness?.recent_8k_filing_date;
@@ -878,21 +898,125 @@ function buildDeterministicInsights(state) {
     `- Operating margin: ${formatQuarterlyMetric(q.operating_margin, 'pct')} — ${metricCitationShort(q.operating_margin, qForm)} (computed: operating income ÷ revenue)`,
     `- FCF: ${formatQuarterlyMetric(q.free_cash_flow)} — ${metricCitationShort(q.free_cash_flow, qForm)} (computed: operating cash flow − capex)`,
     `- EPS: ${formatQuarterlyMetric(q.eps, 'eps')} — ${metricCitationShort(q.eps, qForm)}`,
-    `- Damodaran take (interpretation): Sustainable value creation depends on whether growth is backed by reinvestment and cash conversion, not headline revenue alone.`,
+    `- Analyst view (interpretation): Sustainable value creation depends on whether growth is backed by reinvestment and cash conversion, not headline revenue alone.`,
     `- So-what: ${state.inputs?.exec_type || 'Executive'} should prioritize the metric with the weakest source-backed trend before approving new spend.`,
     '',
     '### Insight 2 — Risk, leverage, and cost of capital',
     `- Issuer profile: ${issuer} [filing classification]`,
     peerReady
       ? `- Peer context: Section 3 FY${state.peer_benchmarks?.benchmark_fy || 2025} table — filing-backed annual SEC facts.`
-      : '- Peer context: Section 3 withheld — insufficient consistent peer data (see Section 8 gaps).',
-    `- Damodaran take (interpretation): Risk shows up in leverage, coverage, and earnings volatility versus peers.`,
+      : '- Peer context: omitted — insufficient consistent peer data across entities (see Section 8 gaps).',
+    `- Analyst view (interpretation): Risk shows up in leverage, coverage, and earnings volatility versus peers.`,
     `- So-what: If leverage or margin trails peers, the strategic plan must explain convergence or justify a premium/discount.`,
     '',
     '### Insight 3 — Narrative vs filings',
-    `- Quarterly anchor: ${qForm} filed ${state.data_freshness?.quarterly_anchor_filing_date || 'N/A'} (report period ${qPeriod}) [SEC filing]`,
-    ref8k ? `- Recent 8-K (reference only, not financial anchor): ${ref8k} filed ${ref8kDate || 'N/A'}` : '- No recent 8-K on file.',
-    `- Damodaran take (interpretation): Markets price expected future cash flows; interim filings test whether the narrative is credible.`,
-    `- So-what: Tie every strategic claim to a filing-backed metric or mark it as interpretation/N/A.`,
+    `- Quarterly anchor: ${qForm} filed ${state.data_freshness?.quarterly_anchor_filing_date || naReason('filing date not recorded')} (report period ${qPeriod}) [SEC filing]`,
+    ref8k ? `- Recent 8-K (reference only, not financial anchor): ${ref8k} filed ${ref8kDate || naReason('8-K filing date not recorded')}` : '- No recent 8-K on file.',
+    `- Analyst view (interpretation): Markets price expected future cash flows; interim filings test whether the narrative is credible.`,
+    `- So-what: Tie every strategic claim to a filing-backed metric or mark it as interpretation with a stated reason.`,
+  ].join('\n');
+}
+
+function buildExecutivePresentationPrompt(state) {
+  const inputs = state.inputs || {};
+  const company = companyDisplayName(state.entity, inputs);
+  const legalName = state.entity?.legal_name || inputs.company_name || company;
+  const ticker = state.entity?.ticker || inputs.ticker || '';
+  const execType = inputs.exec_type || 'executive';
+  const industry = inputs.industry || 'the industry';
+  const provider = inputs.service_provider || 'our team';
+  const expert = inputs.expert_resolved?.name || inputs.expert_pref || 'industry specialist';
+  const slideCount = [3, 4, 5].includes(Number(inputs.slide_count)) ? Number(inputs.slide_count) : 4;
+  const q = getQuarterlyAnchorMetrics(state);
+  const period = q.period_label || 'latest quarter';
+  const fyAnchor = state.research?.filing_anchors?.annual_10k;
+  const fyLabel = fyAnchor?.fy ? `FY${fyAnchor.fy}` : annualSectionLabel(fyAnchor);
+  const market = state.research?.market_data || {};
+  const peerPublished = state.peer_benchmarks?.table_published === true;
+  const freshness = state.data_freshness || {};
+  const qForm = freshness.quarterly_anchor_form || '10-Q';
+
+  const financialFacts = [
+    `Revenue (${period}): ${formatQuarterlyMetric(q.revenue)}`,
+    `Operating margin (${period}): ${formatQuarterlyMetric(q.operating_margin, 'pct')}`,
+    `Net margin (${period}): ${formatQuarterlyMetric(q.net_margin, 'pct')}`,
+    `Free cash flow (${period}): ${formatQuarterlyMetric(q.free_cash_flow)}`,
+    `EPS (${period}): ${formatQuarterlyMetric(q.eps, 'eps')}`,
+    market.market_cap_usd != null
+      ? `Market cap: ${fmtUsdValue(market.market_cap_usd)} (${market.market_cap_source || 'computed from live share price and SEC shares outstanding'})`
+      : naReason('market cap requires live share price and SEC shares outstanding'),
+    market.share_price_usd != null ? `Share price: ${fmtUsdValue(market.share_price_usd)} as of ${market.source_date || 'latest quote'}` : null,
+  ].filter(Boolean);
+
+  const priorities = (state.executive_proposal?.priorities || []).map((p, i) => (
+    `${i + 1}. ${p.title} — Financial hook: ${p.financial_hook || p.rationale || p.metric}`
+  ));
+
+  const valueHooks = (state.value_realization?.signals || []).slice(0, 5).map((s) => (
+    `- ${s.insight} → ${s.value}`
+  ));
+
+  const slideStructures = {
+    3: [
+      'Slide 1: Company snapshot — identity, latest financial headline numbers, and why this matters now for the board.',
+      'Slide 2: Performance and priorities — margins, cash flow, and the top 2–3 filing-backed priorities with dollar or margin impact.',
+      'Slide 3: Recommended actions and business case — what to do next, expected financial impact, and ask of the executive audience.',
+    ],
+    4: [
+      'Slide 1: Company and market context — legal name, ticker, industry, market cap, and latest quarterly anchor.',
+      'Slide 2: Financial performance — revenue, margins, FCF, and EPS from the quarterly filing; call out one-time items if disclosed.',
+      'Slide 3: Strategic insights and risks — three insights tied to specific metrics; include peer context only if data was available.',
+      'Slide 4: Executive recommendations and value case — priorities linked to financial metrics, discovery questions, and next-step ask.',
+    ],
+    5: [
+      'Slide 1: Title and executive summary — company, audience, and the single most important financial message.',
+      'Slide 2: Financial snapshot — quarterly and annual headline metrics with sources.',
+      'Slide 3: Ratio and trend readout — leverage, coverage, and margin trends that frame risk.',
+      'Slide 4: Opportunities tied to financials — each initiative linked to a baseline metric and target improvement.',
+      'Slide 5: Recommended actions, timeline, and ask — 30/60/90-day moves with measurable KPIs.',
+    ],
+  };
+
+  const slides = slideStructures[slideCount] || slideStructures[4];
+
+  return [
+    `Create a ${slideCount}-slide executive presentation for a ${execType} audience.`,
+    '',
+    'AUDIENCE AND TONE',
+    `- Company: ${legalName}${ticker ? ` (${ticker})` : ''}`,
+    `- Industry: ${industry}`,
+    `- Expert lens to weave in (lightly): ${expert}`,
+    `- Presenter positioning: ${provider} advising ${execType} leadership`,
+    '- Tone: board-ready, concise, confident. Use plain business language.',
+    '- Do NOT reference academic valuation frameworks, professor names, or niche finance jargon.',
+  '',
+    'DESIGN DIRECTION',
+    '- Theme: clean executive finance — dark navy or charcoal with one accent color, large numbers, minimal text per slide.',
+    '- Every slide should lead with a number or a clear decision, not a paragraph.',
+    '- Use charts only where a trend or comparison is filing-backed.',
+    '',
+    'SLIDE OUTLINE (follow this structure)',
+    ...slides.map((s) => `- ${s}`),
+    '',
+    'FILING-BACKED FINANCIAL FACTS (use these figures — do not invent numbers)',
+    ...financialFacts.map((f) => `- ${f}`),
+    `- Data anchor: ${qForm} filed ${freshness.quarterly_anchor_filing_date || naReason('filing date not recorded')} (report period ${freshness.quarterly_anchor_report_date || period})`,
+    peerPublished
+      ? `- Peer comparison available for ${fyLabel} — include only if it strengthens the narrative.`
+      : '- Omit peer comparison slides — peer financials were not available with consistent SEC methodology for this run.',
+    '',
+    'OPPORTUNITIES TIED TO FINANCIALS',
+    ...(priorities.length ? priorities : ['- Link each strategic opportunity to a baseline metric from the quarterly filing.']),
+    ...(valueHooks.length ? ['', 'VALUE REALIZATION HOOKS', ...valueHooks] : []),
+    '',
+    'CONTENT RULES',
+    '- Tie every recommendation to a specific financial metric (revenue, margin, FCF, leverage, or market cap).',
+    '- If a figure was not available, state why briefly instead of showing "N/A".',
+    '- Flag one-time items (e.g., termination fees) separately from core operating performance.',
+    '- End with a clear ask: approve diagnostic, set metric targets, or schedule executive review.',
+    '',
+    'OUTPUT FORMAT',
+    '- Produce slide titles, 3–4 bullets per slide, and brief speaker notes.',
+    '- Suitable for import into Gamma, Canva, PowerPoint Copilot, or similar tools.',
   ].join('\n');
 }

@@ -32,7 +32,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "javaScript",
-        "jsCode": "const input = items[0]?.json || {};\nconst body = input.body || input;\nconst now = new Date().toISOString();\nconst slideCountRaw = Number(body.slide_count || body.slideCount || body.inputs?.slide_count || 4);\nconst slideCount = [3,4,5].includes(slideCountRaw) ? slideCountRaw : 4;\nconst existing = body.state || (body.run_id && body.inputs ? body : null);\nif (existing) {\n  existing.updated_at = now;\n  existing.status = existing.status || 'running';\n  existing.current_stage = existing.current_stage || 'initialized';\n  existing.audit_log = existing.audit_log || [];\n  existing.audit_log.push({ timestamp: now, workflow_name: 'WF_MAIN_PROD', status: 'OK', message: 'Production orchestrator received existing state.' });\n  return [{ json: existing }];\n}\nconst peerListRaw = body.peer_list || body.peers || body.known_competitors || '';\nconst peer_list = Array.isArray(peerListRaw) ? peerListRaw : String(peerListRaw || '').split(/[,;\\n|]/).map((s) => s.trim()).filter(Boolean);\nconst state = {\n  run_id: body.run_id || `dfa_prod_${Date.now()}`,\n  created_at: now,\n  updated_at: now,\n  status: 'running',\n  current_stage: 'initialized',\n  inputs: {\n    company_name: body.company_name || body.companyName || body.company || '',\n    ticker: body.ticker || body.symbol || '',\n    exec_type: body.exec_type || body.executive || '',\n    industry: body.industry || '',\n    company_type: body.company_type || body.companyType || 'auto',\n    expert_pref: body.expert_pref || body.expert || '',\n    expert_resolved: body.expert_resolved || null,\n    service_provider: body.service_provider || body.my_company || 'MY COMPANY',\n    peer_list,\n    slide_count: slideCount,\n    deck_type: `gamma_${slideCount}_slide_production`,\n    gamma_api_enabled: Boolean(body.gamma_api_enabled),\n    human_review: Boolean(body.human_review),\n    advanced_context: { source_notes: body.source_notes || body.notes || body.urls || '', peers: peer_list },\n  },\n  entity: null,\n  research: {},\n  normalized: { periods: [], metrics: {}, gaps: [], reliability_map: {}, formulas: {} },\n  sections: {},\n  gamma_deck: null,\n  delivery: {},\n  audit_log: [{ timestamp: now, workflow_name: 'WF_MAIN_PROD', status: 'OK', message: 'Production run initialized with live-data pipeline v2.' }],\n};\nreturn [{ json: state }];"
+        "jsCode": "const input = items[0]?.json || {};\nconst body = input.body || input;\nconst now = new Date().toISOString();\nconst slideCountRaw = Number(body.slide_count || body.slideCount || body.inputs?.slide_count || 4);\nconst slideCount = [3,4,5].includes(slideCountRaw) ? slideCountRaw : 4;\nconst existing = body.state || (body.run_id && body.inputs ? body : null);\nif (existing) {\n  existing.updated_at = now;\n  existing.status = existing.status || 'running';\n  existing.current_stage = existing.current_stage || 'initialized';\n  existing.audit_log = existing.audit_log || [];\n  existing.audit_log.push({ timestamp: now, workflow_name: 'WF_MAIN_PROD', status: 'OK', message: 'Production orchestrator received existing state.' });\n  return [{ json: existing }];\n}\nconst peerListRaw = body.peer_list || body.peers || body.known_competitors || '';\nconst peer_list = Array.isArray(peerListRaw) ? peerListRaw : String(peerListRaw || '').split(/[,;\\n|]/).map((s) => s.trim()).filter(Boolean);\nconst state = {\n  run_id: body.run_id || `dfa_prod_${Date.now()}`,\n  created_at: now,\n  updated_at: now,\n  status: 'running',\n  current_stage: 'initialized',\n  inputs: {\n    company_name: body.company_name || body.companyName || body.company || '',\n    ticker: body.ticker || body.symbol || '',\n    exec_type: body.exec_type || body.executive || '',\n    industry: body.industry || '',\n    company_type: body.company_type || body.companyType || 'auto',\n    expert_pref: body.expert_pref || body.expert || '',\n    expert_resolved: body.expert_resolved || null,\n    service_provider: body.service_provider || body.my_company || 'MY COMPANY',\n    peer_list,\n    slide_count: slideCount,\n    human_review: Boolean(body.human_review),\n    advanced_context: { source_notes: body.source_notes || body.notes || body.urls || '', peers: peer_list },\n  },\n  entity: null,\n  research: {},\n  normalized: { periods: [], metrics: {}, gaps: [], reliability_map: {}, formulas: {} },\n  sections: {},\n  presentation_prompt: null,\n  delivery: {},\n  audit_log: [{ timestamp: now, workflow_name: 'WF_MAIN_PROD', status: 'OK', message: 'Production run initialized with live-data pipeline v2.' }],\n};\nreturn [{ json: state }];"
       }
     },
     {
@@ -252,7 +252,7 @@
     },
     {
       "id": "deck_agent",
-      "name": "Gamma Deck Agent",
+      "name": "Presentation Prompt Agent",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
@@ -314,7 +314,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "javaScript",
-        "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nstate.updated_at = now;\nstate.status = state.gamma_deck?.gamma_markdown ? 'completed' : 'completed_with_warnings';\nstate.current_stage = 'ready';\nstate.portal_result = {\n  run_id: state.run_id,\n  status: state.status,\n  company: state.entity,\n  deck_status: state.gamma_deck?.status || 'missing',\n  gamma_markdown: state.gamma_deck?.gamma_markdown || '',\n  final_report_markdown: state.final_report_markdown || '',\n  data_freshness: state.data_freshness || {},\n  market_data: state.research?.market_data || {},\n  slides_json: state.gamma_deck?.slides_json || [],\n  missing_data_notes: state.gamma_deck?.missing_data_notes || [],\n  suggested_gamma_theme: state.gamma_deck?.suggested_gamma_theme || 'Clean executive finance theme',\n  source_coverage: state.normalized?.source_coverage || {},\n  qa: state.qa || {},\n  delivery: state.delivery || {},\n  approval: state.approval || {},\n};\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_MAIN_PROD', status: state.status === 'completed' ? 'OK' : 'WARN', message: 'Production run finalized for portal delivery.' });\nreturn [{ json: state }];"
+        "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nstate.updated_at = now;\nstate.status = state.presentation_prompt?.prompt_text ? 'completed' : 'completed_with_warnings';\nstate.current_stage = 'ready';\nstate.portal_result = {\n  run_id: state.run_id,\n  status: state.status,\n  company: state.entity,\n  presentation_prompt: state.presentation_prompt?.prompt_text || '',\n  presentation_prompt_status: state.presentation_prompt?.status || 'missing',\n  final_report_markdown: state.final_report_markdown || '',\n  data_freshness: state.data_freshness || {},\n  market_data: state.research?.market_data || {},\n  source_coverage: state.normalized?.source_coverage || {},\n  qa: state.qa || {},\n  delivery: state.delivery || {},\n  approval: state.approval || {},\n};\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_MAIN_PROD', status: state.status === 'completed' ? 'OK' : 'WARN', message: 'Production run finalized for portal delivery.' });\nreturn [{ json: state }];"
       }
     },
     {
@@ -356,7 +356,7 @@
             "industry": "={{ $json.inputs.industry }}",
             "status": "={{ $json.status }}",
             "state_json": "={{ JSON.stringify($json) }}",
-            "final_report_markdown": "={{ $json.final_report_markdown || ($json.gamma_deck && $json.gamma_deck.gamma_markdown) || \"\" }}",
+            "final_report_markdown": "={{ $json.final_report_markdown || \"\" }}",
             "google_doc_url": "",
             "pdf_url": ""
           },
@@ -600,7 +600,7 @@
             "industry": "={{ $json.inputs.industry }}",
             "status": "={{ $json.status }}",
             "state_json": "={{ JSON.stringify({ run_id: $json.run_id, created_at: $json.created_at, updated_at: $json.updated_at, status: $json.status, current_stage: $json.current_stage, progress: $json.progress, inputs: $json.inputs, entity: $json.entity, data_freshness: $json.data_freshness, research: { market_data: $json.research?.market_data || null }, qa: $json.qa || null, approval: $json.approval || null, audit_log: ($json.audit_log || []).slice(-12) }) }}",
-            "final_report_markdown": "={{ $json.final_report_markdown || ($json.gamma_deck && $json.gamma_deck.gamma_markdown) || \"\" }}",
+            "final_report_markdown": "={{ $json.final_report_markdown || \"\" }}",
             "google_doc_url": "",
             "pdf_url": ""
           },
@@ -719,18 +719,7 @@
       "main": [
         [
           {
-            "node": "Gamma Deck Agent",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Gamma Deck Agent": {
-      "main": [
-        [
-          {
-            "node": "Delivery Agent",
+            "node": "Presentation Prompt Agent",
             "type": "main",
             "index": 0
           }
@@ -852,6 +841,17 @@
         [
           {
             "node": "Assembly QA Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Presentation Prompt Agent": {
+      "main": [
+        [
+          {
+            "node": "Delivery Agent",
             "type": "main",
             "index": 0
           }

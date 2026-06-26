@@ -24,8 +24,10 @@ function quarterlyValue(metricKey) {
   return cell ? cell.value : null;
 }
 
-function safeRatio(num, den, asPct = false) {
-  if (num === null || den === null || den === 0) return 'N/A';
+function safeRatio(num, den, asPct = false, label) {
+  if (num === null || den === null || den === 0) {
+    return naReason(label || 'ratio not computable because numerator or denominator is missing on the filing');
+  }
   const v = num / den;
   return asPct ? fmtPct(v) : fmtRatio(v);
 }
@@ -59,7 +61,9 @@ const annual = [
   annualRatioRow('Current Ratio', 'Current assets / current liabilities', safeRatioSeries(ca, cl)),
   annualRatioRow('Interest Coverage', 'Operating income / interest expense', safeRatioSeries(op, interest)),
   annualRatioRow('Return on Capital Employed', 'Operating income / (assets - current liabilities)', years.map((_, i) => {
-    if (op[i] === null || assets[i] === null || cl[i] === null || (assets[i] - cl[i]) === 0) return 'N/A';
+    if (op[i] === null || assets[i] === null || cl[i] === null || (assets[i] - cl[i]) === 0) {
+      return naReason('ROCE not computable — required line items missing for this fiscal year');
+    }
     return fmtPct(op[i] / (assets[i] - cl[i]));
   })),
   annualRatioRow('Gross Margin', 'Gross profit / revenue', safeRatioSeries(gross, revenue, true)),
@@ -87,7 +91,7 @@ const quarterly = [
   { label: 'Free Cash Flow to Revenue', formula: 'FCF / revenue', value: safeRatio(qFcf, qRevenue, true), reporting_period: qAnchor?.report_date || qPeriod },
   { label: 'Current Ratio', formula: 'Current assets / current liabilities', value: safeRatio(qCa, qCl), reporting_period: qAnchor?.report_date || qPeriod },
   { label: 'Interest Coverage', formula: 'Operating income / interest expense', value: safeRatio(qOp, qInterest), reporting_period: qAnchor?.report_date || qPeriod },
-  { label: 'Return on Capital Employed', formula: 'Operating income / (assets - current liabilities)', value: (qOp !== null && qAssets !== null && qCl !== null && (qAssets - qCl) !== 0) ? fmtPct(qOp / (qAssets - qCl)) : 'N/A', reporting_period: qAnchor?.report_date || qPeriod },
+  { label: 'Return on Capital Employed', formula: 'Operating income / (assets - current liabilities)', value: (qOp !== null && qAssets !== null && qCl !== null && (qAssets - qCl) !== 0) ? fmtPct(qOp / (qAssets - qCl)) : naReason('ROCE not computable — operating income, assets, or current liabilities missing'), reporting_period: qAnchor?.report_date || qPeriod },
   { label: 'Gross Margin', formula: 'Gross profit / revenue', value: safeRatio(qGross, qRevenue, true), reporting_period: qAnchor?.report_date || qPeriod },
   { label: 'Operating Margin', formula: 'Operating income / revenue', value: safeRatio(qOp, qRevenue, true), reporting_period: qAnchor?.report_date || qPeriod },
   { label: 'Net Margin', formula: 'Net income / revenue', value: safeRatio(qNet, qRevenue, true), reporting_period: qAnchor?.report_date || qPeriod },
@@ -95,7 +99,7 @@ const quarterly = [
 
 const fyLabel = fyAnchor ? `FY${fyAnchor.fy || 2025}` : 'FY2025';
 const fyAnchorNote = fyAnchor
-  ? `Annual ratios below are ${fyLabel} / FY2024 / FY2023 only — not quarterly. ${fyLabel} column anchored on ${fyAnchor.form} (report period ${fyAnchor.report_date || 'N/A'}).`
+  ? `Annual ratios below are ${fyLabel} / FY2024 / FY2023 only — not quarterly. ${fyLabel} column anchored on ${fyAnchor.form} (report period ${fyAnchor.report_date || naReason('report period not recorded')}).`
   : 'Annual ratios below are FY2025 / FY2024 / FY2023 only — not quarterly.';
 const markdown = [
   '## Section 5: Ratio Dashboard',

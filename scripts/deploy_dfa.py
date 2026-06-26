@@ -131,7 +131,7 @@ def save_state_node(node_id, name, pos, light=False):
                     'industry': '={{ $json.inputs.industry }}',
                     'status': '={{ $json.status }}',
                     'state_json': state_expr,
-                    'final_report_markdown': '={{ $json.final_report_markdown || ($json.gamma_deck && $json.gamma_deck.gamma_markdown) || "" }}',
+                    'final_report_markdown': '={{ $json.final_report_markdown || "" }}',
                     'google_doc_url': '',
                     'pdf_url': '',
                 },
@@ -224,6 +224,38 @@ def load_main_prod_base():
     import subprocess
     raw = subprocess.check_output(['git', 'show', '2cd73fd:dfa-workflows/Qc2t6hELYvHMtuox.json'])
     return json.loads(raw)
+
+
+def patch_presentation_prompt(wf):
+    wf['name'] = 'DFA - WF_PRESENTATION_PROMPT'
+    patch_timeouts(wf, 120)
+    wf['nodes'] = [
+        {'id': 'trigger', 'name': 'Subworkflow Input', 'type': 'n8n-nodes-base.executeWorkflowTrigger', 'typeVersion': 1, 'position': [0, 0], 'parameters': {}},
+        code_node('presentation_prompt', 'Build Executive Presentation Prompt', [280, 0], bundle('wf_presentation_prompt.js')),
+    ]
+    wf['connections'] = {'Subworkflow Input': {'main': [[{'node': 'Build Executive Presentation Prompt', 'type': 'main', 'index': 0}]]}}
+
+
+def patch_delivery(wf):
+    set_node_code(wf, 'Prepare Delivery Payloads', """const state = items[0]?.json?.state || items[0]?.json || {};
+const targets = state.inputs?.delivery_targets || ['webhook_response'];
+state.delivery = state.delivery || {};
+state.delivery.targets = targets;
+state.delivery.final_artifact_type = 'presentation_prompt';
+state.delivery.payloads = {
+  presentation_tool: {
+    action: 'copy_prompt_into_gamma_canva_or_ppt',
+    artifact_field: 'presentation_prompt.prompt_text',
+    note: 'Paste the executive presentation prompt into Gamma, Canva, PowerPoint Copilot, or similar.',
+  },
+  full_report: {
+    action: 'copy_full_report_markdown',
+    artifact_field: 'final_report_markdown',
+  },
+};
+state.audit_log = state.audit_log || [];
+state.audit_log.push({ timestamp: new Date().toISOString(), workflow_name: 'WF_DELIVERY', status: 'OK', message: 'Delivery payloads prepared for report and presentation prompt.' });
+return [{ json: state }];""")
 
 
 def patch_entity(wf):
@@ -351,8 +383,6 @@ const state = {
     service_provider: body.service_provider || body.my_company || 'MY COMPANY',
     peer_list,
     slide_count: slideCount,
-    deck_type: `gamma_${slideCount}_slide_production`,
-    gamma_api_enabled: Boolean(body.gamma_api_enabled),
     human_review: Boolean(body.human_review),
     advanced_context: { source_notes: body.source_notes || body.notes || body.urls || '', peers: peer_list },
   },
@@ -360,7 +390,7 @@ const state = {
   research: {},
   normalized: { periods: [], metrics: {}, gaps: [], reliability_map: {}, formulas: {} },
   sections: {},
-  gamma_deck: null,
+  presentation_prompt: null,
   delivery: {},
   audit_log: [{ timestamp: now, workflow_name: 'WF_MAIN_PROD', status: 'OK', message: 'Production run initialized with live-data pipeline v2.' }],
 };
@@ -389,20 +419,17 @@ return [{ json: state }];"""
     finalize_code = """const state = items[0]?.json?.state || items[0]?.json || {};
 const now = new Date().toISOString();
 state.updated_at = now;
-state.status = state.gamma_deck?.gamma_markdown ? 'completed' : 'completed_with_warnings';
+state.status = state.presentation_prompt?.prompt_text ? 'completed' : 'completed_with_warnings';
 state.current_stage = 'ready';
 state.portal_result = {
   run_id: state.run_id,
   status: state.status,
   company: state.entity,
-  deck_status: state.gamma_deck?.status || 'missing',
-  gamma_markdown: state.gamma_deck?.gamma_markdown || '',
+  presentation_prompt: state.presentation_prompt?.prompt_text || '',
+  presentation_prompt_status: state.presentation_prompt?.status || 'missing',
   final_report_markdown: state.final_report_markdown || '',
   data_freshness: state.data_freshness || {},
   market_data: state.research?.market_data || {},
-  slides_json: state.gamma_deck?.slides_json || [],
-  missing_data_notes: state.gamma_deck?.missing_data_notes || [],
-  suggested_gamma_theme: state.gamma_deck?.suggested_gamma_theme || 'Clean executive finance theme',
   source_coverage: state.normalized?.source_coverage || {},
   qa: state.qa || {},
   delivery: state.delivery || {},
@@ -414,8 +441,22 @@ return [{ json: state }];"""
     set_node_code(wf, 'Finalize Production Result', finalize_code)
 
     for n in wf['nodes']:
+        if n['name'] == 'Gamma Deck Agent':
+            n['name'] = 'Presentation Prompt Agent'
         if n['name'] == 'Save Final Run State':
-            n['parameters']['columns']['value']['final_report_markdown'] = '={{ $json.final_report_markdown || ($json.gamma_deck && $json.gamma_deck.gamma_markdown) || "" }}'
+            n['parameters']['columns']['value']['final_report_markdown'] = '={{ $json.final_report_markdown || "" }}'
+
+    if 'Gamma Deck Agent' in wf['connections']:
+        wf['connections']['Presentation Prompt Agent'] = wf['connections'].pop('Gamma Deck Agent')
+    for conn in wf['connections'].values():
+        for branch in conn.get('main', []):
+            for edge in branch:
+                if edge.get('node') == 'Gamma Deck Agent':
+                    edge['node'] = 'Presentation Prompt Agent'
+    for branch in wf['connections'].get('Assembly QA Agent', {}).get('main', []):
+        for edge in branch:
+            if edge.get('node') == 'Gamma Deck Agent':
+                edge['node'] = 'Presentation Prompt Agent'
 
     if 'Save Running State' not in names:
         init_node = next(n for n in wf['nodes'] if n['name'] == 'Initialize Production State')
@@ -453,7 +494,7 @@ return [{ json: {
   progress_label: progress.label || state?.current_stage || null,
   data_freshness: freshness,
   market_data: state?.research?.market_data || null,
-  deck_status: state?.gamma_deck?.status || null,
+  presentation_prompt_status: state?.presentation_prompt?.status || null,
   qa_status: state?.qa?.validation_status || null,
   updated_at: row?.updated_at || state?.updated_at || null,
   audit_log: (state?.audit_log || []).slice(-8),
@@ -470,7 +511,6 @@ def patch_result_api(wf):
     result_code = """const row = items[0]?.json || null;
 let state = null;
 try { state = row?.state_json ? JSON.parse(row.state_json) : null; } catch (e) {}
-const deck = state?.gamma_deck || {};
 const freshness = state?.data_freshness || {};
 const market = state?.research?.market_data || {};
 return [{ json: {
@@ -479,10 +519,8 @@ return [{ json: {
   status: row?.status || 'not_found',
   company: state?.entity || null,
   final_report_markdown: state?.final_report_markdown || row?.final_report_markdown || '',
-  gamma_markdown: deck.gamma_markdown || '',
-  slides_json: deck.slides_json || [],
-  missing_data_notes: deck.missing_data_notes || [],
-  suggested_gamma_theme: deck.suggested_gamma_theme || 'Clean executive finance theme',
+  presentation_prompt: state?.presentation_prompt?.prompt_text || '',
+  presentation_prompt_status: state?.presentation_prompt?.status || 'missing',
   data_freshness: freshness,
   market_data: market,
   source_coverage: state?.normalized?.source_coverage || {},
@@ -529,7 +567,7 @@ if (!companyName) {
   return [{ json: { valid: false, accepted: false, status: 'blocked_missing_inputs', conversation_step: 'question_1', missing_inputs: ['company_name'], next_question: 'What is the company name you want analyzed (and ticker symbol if public)?', message: 'Question 1 is required before any analysis can start.', received_at: now } }];
 }
 if (!execType || !industry || !expertPref) {
-  return [{ json: { valid: false, accepted: false, status: 'blocked_missing_inputs', conversation_step: 'question_2', missing_inputs: ['exec_type','industry','expert_pref'].filter((f) => !({exec_type: execType, industry, expert_pref: expertPref })[f]), next_question: 'Which C-level executive is this pitch for, what industry is the company in, and which industry expert perspective should I blend with Damodaran?', message: 'Question 2 is required. No analysis will start until executive, industry, and expert are provided.', company_name_received: companyName, ticker_received: ticker, received_at: now } }];
+  return [{ json: { valid: false, accepted: false, status: 'blocked_missing_inputs', conversation_step: 'question_2', missing_inputs: ['exec_type','industry','expert_pref'].filter((f) => !({exec_type: execType, industry, expert_pref: expertPref })[f]), next_question: 'Which C-level executive is this pitch for, what industry is the company in, and which industry expert perspective should inform the analysis?', message: 'Question 2 is required. No analysis will start until executive, industry, and expert are provided.', company_name_received: companyName, ticker_received: ticker, received_at: now } }];
 }
 
 const runId = body.run_id || `dfa_prod_${Date.now()}`;
@@ -558,7 +596,7 @@ state.approval = {
   slack_message_template: reviewRequired ? `Report ready for ${state.inputs?.company_name}. Approve | Request Changes | Reject` : null,
 };
 state.delivery = state.delivery || {};
-state.delivery.status = reviewRequired ? 'pending_approval' : 'approved_for_gamma';
+state.delivery.status = reviewRequired ? 'pending_approval' : 'approved_for_delivery';
 state.audit_log = state.audit_log || [];
 state.audit_log.push({ timestamp: new Date().toISOString(), workflow_name: 'WF_APPROVAL', status: reviewRequired ? 'PENDING' : 'SKIPPED', message: reviewRequired ? 'Human review required before external delivery.' : 'Auto-approved.' });
 return [{ json: state }];""")
@@ -576,6 +614,8 @@ def main():
         ('nSibhacyiyR8Vwxx', patch_event_research),
         ('u7zcuTFphfzjenZ0', patch_proposal),
         ('VY5O6pYOMa28iWJb', patch_value_realization),
+        ('H7r4ladOcX44a6cu', patch_presentation_prompt),
+        ('xpn2OzryO0ZENK8h', patch_delivery),
         ('Hep7G1mvINz1NdqG', patch_assemble_qa),
         ('RLp9AMthAvTC0iBC', patch_analyze),
         ('0purjOnIMYZOauYb', patch_api_start),

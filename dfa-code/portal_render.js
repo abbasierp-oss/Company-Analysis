@@ -56,15 +56,15 @@ const html = `<!doctype html>
   <main class="wrap">
     <section class="hero">
       <div class="card intro">
-        <div class="eyebrow">Damodaran-Style Financial Analyst System</div>
-        <h1>Live SEC financials to full 9-section report and Gamma deck.</h1>
+        <div class="eyebrow">Executive Financial Analysis System</div>
+        <h1>Live SEC financials to full analyst report and presentation prompt.</h1>
         <p>Financial figures are fetched live from SEC EDGAR and public market sources at run time. The system gates on your two required questions before starting analysis.</p>
         <div class="pillrow">
           <span class="pill">Live SEC EDGAR fetch</span>
           <span class="pill">Real-time market cap</span>
           <span class="pill">SEC peer benchmarks</span>
-          <span class="pill">9-section report</span>
-          <span class="pill">Gamma deck output</span>
+          <span class="pill">Executive report</span>
+          <span class="pill">Presentation prompt</span>
         </div>
       </div>
       <div class="card">
@@ -76,7 +76,7 @@ const html = `<!doctype html>
             <button id="nextBtn" type="button">Continue to Question 2</button>
           </div>
           <div id="step2" class="step">
-            <div class="step-title">Question 2: Which executive, industry, and expert perspective should be blended with Damodaran?</div>
+            <div class="step-title">Question 2: Which executive, industry, and expert perspective should inform the analysis?</div>
             <div class="grid2">
               <div><label>C-level executive</label><select name="exec_type" required><option value="">Choose executive</option><option>CFO</option><option>CIO</option><option>CEO</option><option>COO</option><option>CDO</option><option>CISO</option><option>Board</option><option>Investor</option></select></div>
               <div><label>Industry</label><input name="industry" placeholder="Example: Technology" required /></div>
@@ -113,17 +113,16 @@ const html = `<!doctype html>
         <div class="metric"><b>QA</b><span id="qa">-</span></div>
         <div class="actions">
           <button class="secondary" id="copyReport" type="button">Copy Full Report</button>
-          <button class="secondary" id="copyMarkdown" type="button">Copy Gamma Markdown</button>
-          <button class="secondary" id="copyJson" type="button">Copy Slide JSON</button>
+          <button class="secondary" id="copyMarkdown" type="button">Copy Presentation Prompt</button>
         </div>
       </div>
       <div class="card box">
         <div class="tabs">
           <button class="tab active" data-tab="report" type="button">Full Report</button>
-          <button class="tab" data-tab="deck" type="button">Gamma Deck</button>
+          <button class="tab" data-tab="deck" type="button">Presentation Prompt</button>
         </div>
         <div id="panelReport" class="panel show"><pre id="report">Full report will appear here.</pre></div>
-        <div id="panelDeck" class="panel"><pre id="deck">Gamma deck will appear here.</pre></div>
+        <div id="panelDeck" class="panel"><pre id="deck">Presentation prompt will appear here.</pre></div>
       </div>
     </section>
   </main>
@@ -189,7 +188,7 @@ const html = `<!doctype html>
         setText('latestFiling', (freshness.latest_filing_form || '') + ' ' + (freshness.latest_filing_date || ''));
         setText('qa', data.qa && data.qa.validation_status ? data.qa.validation_status : 'N/A');
         document.getElementById('report').textContent = data.final_report_markdown || 'No full report returned.';
-        document.getElementById('deck').textContent = data.gamma_markdown || 'No deck markdown returned.';
+        document.getElementById('deck').textContent = data.presentation_prompt || 'No presentation prompt returned.';
         statusEl.classList.remove('show');
         resultsEl.classList.add('show');
       } catch (err) {
@@ -201,8 +200,7 @@ const html = `<!doctype html>
       }
     });
     document.getElementById('copyReport').addEventListener('click', () => copyText(latest && latest.final_report_markdown));
-    document.getElementById('copyMarkdown').addEventListener('click', () => copyText(latest && latest.gamma_markdown));
-    document.getElementById('copyJson').addEventListener('click', () => copyText(JSON.stringify((latest && latest.slides_json) || [], null, 2)));
+    document.getElementById('copyMarkdown').addEventListener('click', () => copyText(latest && latest.presentation_prompt));
   </script>
 </body>
 </html>`;

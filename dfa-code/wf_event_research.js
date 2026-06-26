@@ -12,15 +12,11 @@ function buildCapitalStructureBullets() {
   if (oneTime.some((f) => f.id === 'warner_bros_termination_fee')) {
     bullets.push(`${company} disclosed the Warner Bros. termination fee in Q1 FY2026, which materially affected interest and other income.`);
   }
-  return bullets.slice(0, 1);
+  return bullets;
 }
 
 const capitalBullets = buildCapitalStructureBullets();
 const leadershipBullet = detectLeadershipBullet(state, signals);
-const capitalSection = capitalBullets.length
-  ? `### capital structure / M&A\n\n${capitalBullets.map((b) => `- ${b}`).join('\n')}`
-  : '### capital structure / M&A\n\nN/A — no supported public signal found in this run.';
-
 const filingEvents = filings.filter((f) => isSupportedForm(f.form) && f.form !== '8-K').slice(0, 12).map((f) => ({
   form: f.form,
   filing_date: f.filing_date,
@@ -31,27 +27,35 @@ const filingEvents = filings.filter((f) => isSupportedForm(f.form) && f.form !==
 }));
 const ref8k = (state.research?.filing_anchors?.recent_8k) || filings.find((f) => f.form === '8-K');
 
-const markdown = [
+const parts = [
   '## Section 7: Read Between The Lines',
   '',
   'Supported events require filing or public-source text. 8-K items are reference context only.',
-  '',
-  capitalSection,
-  '',
-  '### leadership changes',
-  '',
-  leadershipBullet || 'N/A — no filing-backed leadership change signal found in this run.',
-  '',
-  'Recent operating filing context (financial anchors):',
-  ...(filingEvents.length
-    ? filingEvents.map((f) => `- ${f.form} filed ${f.filing_date || 'N/A'} for report date ${f.report_date || 'N/A'} (${f.source_name})`)
-    : ['- N/A — no recent operating filing list available.']),
-  ref8k ? `\nRecent 8-K reference (not a financial anchor): ${ref8k.form} filed ${ref8k.filing_date || 'N/A'}.` : '',
-].join('\n\n');
+];
+
+if (capitalBullets.length) {
+  parts.push('', '### Capital structure / M&A', '', ...capitalBullets.map((b) => `- ${b}`));
+}
+if (leadershipBullet) {
+  parts.push('', '### Leadership changes', '', leadershipBullet);
+}
+if (filingEvents.length) {
+  parts.push(
+    '',
+    '### Recent operating filing context (financial anchors)',
+    '',
+    ...filingEvents.map((f) => `- ${f.form} filed ${f.filing_date || naReason('filing date not recorded')} for report date ${f.report_date || naReason('report period not recorded')} (${f.source_name})`),
+  );
+}
+if (ref8k) {
+  parts.push('', `Recent 8-K reference (not a financial anchor): ${ref8k.form} filed ${ref8k.filing_date || naReason('8-K filing date not recorded')}.`);
+}
+
+const markdown = parts.join('\n');
 
 state.event_research = { generated_at: now, capital_structure_bullets: capitalBullets, leadership_bullet: leadershipBullet, recent_filings: filingEvents, markdown };
 state.sections = state.sections || {};
 state.sections.s7_rtbl = markdown;
 state.audit_log = state.audit_log || [];
-state.audit_log.push({ timestamp: now, workflow_name: 'WF_EVENT_RESEARCH', status: 'OK', message: 'RTBL section prepared with capital-structure and leadership bullets.' });
+state.audit_log.push({ timestamp: now, workflow_name: 'WF_EVENT_RESEARCH', status: 'OK', message: 'RTBL section prepared with available signals only.' });
 return [{ json: state }];

@@ -48,14 +48,16 @@ function computedMetric(num, den, unit, formula, periodMeta, flagMetricId, perio
 }
 
 function formatValue(cell, kind) {
-  if (!cell || cell.value === null || cell.value === undefined) return 'N/A';
+  if (!cell || cell.value === null || cell.value === undefined) {
+    return naReason('required line item not found on the anchored SEC filing');
+  }
   if (kind === 'ratio') return fmtPct(cell.value);
   if (kind === 'eps') return fmtEps(cell.value);
   return fmtUsdValue(cell.value);
 }
 
 function snapshotRow(metricId, label, anchor, kind, formula, flagMetricId) {
-  const periodLabel = anchor ? anchorPeriodLabel(anchor) : 'N/A';
+  const periodLabel = anchor ? anchorPeriodLabel(anchor) : naReason('no filing anchor for period label');
   let cell = null;
   if (metricId === 'operating_margin') {
     cell = computedMetric(
@@ -123,12 +125,12 @@ function snapshotRow(metricId, label, anchor, kind, formula, flagMetricId) {
   const flagNote = cell?.one_time_flag ? ` ⚠ ${cell.one_time_flag}` : '';
   const source = cell
     ? `${cell.source_section || 'SEC'} — ${cell.source_name || 'SEC EDGAR'}`
-    : 'N/A — required line item not found on anchored filing';
+    : naReason('required line item not found on the anchored SEC filing');
   return {
     metric: metricId,
     label,
     value_display: formatValue(cell, kind) + flagNote,
-    reporting_period: cell?.reporting_period || anchor?.report_date || 'N/A',
+    reporting_period: cell?.reporting_period || anchor?.report_date || naReason('reporting period not on filing'),
     source,
     raw: cell,
     formula: cell?.formula || formula || null,
@@ -152,7 +154,7 @@ if (dilutedWa) {
     metric: 'weighted_avg_diluted_shares',
     label: 'Weighted-Avg Diluted Shares',
     value_display: Number(dilutedWa.value).toLocaleString('en-US'),
-    reporting_period: dilutedWa.reporting_period || qAnchor?.report_date || 'N/A',
+    reporting_period: dilutedWa.reporting_period || qAnchor?.report_date || naReason('report period not on quarterly anchor'),
     source: `${dilutedWa.source_name} — quarterly filing anchor; not market-implied shares`,
     raw: { value: dilutedWa.value, unit: 'shares', source_name: dilutedWa.source_name, reporting_period: dilutedWa.reporting_period },
   });
@@ -177,39 +179,39 @@ if (market.incomplete) {
     '',
     'Market data is incomplete in this run; share price is available, market cap is not populated, and implied shares are not computed.',
     '',
-    market.share_price_usd != null ? `Share price: ${fmtUsdValue(market.share_price_usd)} (${market.source_date || 'N/A'}, Yahoo Finance).` : '',
+    market.share_price_usd != null ? `Share price: ${fmtUsdValue(market.share_price_usd)} (${market.source_date || naReason('quote date not returned')}, Yahoo Finance).` : '',
   ].filter(Boolean).join('\n');
 } else {
   const marketRows = [
     {
       label: 'Computed Market Cap',
-      value_display: market.market_cap_usd != null ? fmtUsdValue(market.market_cap_usd) : 'N/A',
+      value_display: market.market_cap_usd != null ? fmtUsdValue(market.market_cap_usd) : naReason('market cap requires share price and SEC DEI shares outstanding'),
       reporting_period: market.source_date || 'latest',
       source: market.market_cap_source || 'Computed: Yahoo share price × SEC DEI shares outstanding',
     },
     {
       label: 'Share Price (Yahoo Finance)',
-      value_display: market.share_price_usd != null ? fmtUsdValue(market.share_price_usd) : 'N/A',
+      value_display: market.share_price_usd != null ? fmtUsdValue(market.share_price_usd) : naReason('live quote not returned from Yahoo Finance'),
       reporting_period: market.source_date || 'latest',
-      source: `Yahoo Finance @ ${market.source_date || 'N/A'}`,
+      source: `Yahoo Finance @ ${market.source_date || naReason('quote date not returned')}`,
     },
     {
       label: 'Shares Outstanding (DEI, point-in-time)',
-      value_display: market.shares_outstanding != null ? Number(market.shares_outstanding).toLocaleString('en-US') : 'N/A',
-      reporting_period: market.shares_outstanding_as_of || 'N/A',
+      value_display: market.shares_outstanding != null ? Number(market.shares_outstanding).toLocaleString('en-US') : naReason('SEC DEI shares outstanding not found'),
+      reporting_period: market.shares_outstanding_as_of || naReason('DEI shares as-of date not recorded'),
       source: market.shares_outstanding_source || 'SEC DEI',
     },
     {
       label: 'Weighted-Avg Diluted Shares (10-Q anchor)',
-      value_display: market.weighted_avg_diluted_shares != null ? Number(market.weighted_avg_diluted_shares).toLocaleString('en-US') : 'N/A',
-      reporting_period: market.weighted_avg_diluted_shares_period || qAnchor?.report_date || 'N/A',
+      value_display: market.weighted_avg_diluted_shares != null ? Number(market.weighted_avg_diluted_shares).toLocaleString('en-US') : naReason('weighted-average diluted shares not on quarterly anchor'),
+      reporting_period: market.weighted_avg_diluted_shares_period || qAnchor?.report_date || naReason('quarterly anchor report period not recorded'),
       source: `${market.weighted_avg_diluted_shares_source || 'SEC EDGAR quarterly anchor'} — quarterly filing anchor; not market-implied shares`,
     },
   ];
   markdownMarket = [
     tableMarkdown(
       '## Section 2c: Market Data',
-      `Live quote: Yahoo Finance @ ${market.source_date || 'N/A'}.`,
+      `Live quote: Yahoo Finance @ ${market.source_date || naReason('quote date not returned')}.`,
       marketRows,
     ),
     '',
@@ -230,14 +232,14 @@ function tableMarkdown(title, anchorNote, rows) {
 }
 
 const qAnchorNote = qAnchor
-  ? `Anchored on ${qAnchor.form} filed ${qAnchor.filing_date || 'N/A'} (report period ${qAnchor.report_date || 'N/A'}).`
-  : 'No interim filing anchor found.';
+  ? `Anchored on ${qAnchor.form} filed ${qAnchor.filing_date || naReason('filing date not recorded')} (report period ${qAnchor.report_date || naReason('report period not recorded')}).`
+  : naReason('no interim filing anchor found');
 const fyAnchorNote = fyAnchor
-  ? `Anchored on ${fyAnchor.form} filed ${fyAnchor.filing_date || 'N/A'} (report period ${fyAnchor.report_date || 'N/A'}).`
-  : 'No annual filing anchor found.';
+  ? `Anchored on ${fyAnchor.form} filed ${fyAnchor.filing_date || naReason('filing date not recorded')} (report period ${fyAnchor.report_date || naReason('report period not recorded')}).`
+  : naReason('no annual filing anchor found');
 const ref8k = anchors.recent_8k;
 const refNote = ref8k
-  ? `Recent 8-K reference (not used for financial anchors): ${ref8k.form} filed ${ref8k.filing_date || 'N/A'}.`
+  ? `Recent 8-K reference (not used for financial anchors): ${ref8k.form} filed ${ref8k.filing_date || naReason('8-K filing date not recorded')}.`
   : 'No recent 8-K on file.';
 
 const markdownQuarterly = tableMarkdown(
@@ -266,7 +268,7 @@ const markdown = [
   '',
   refNote,
   '',
-  'Notes: All monetary figures are shown in USD. N/A means the required source line item was not found on the anchored SEC filing.',
+  'Notes: All monetary figures are shown in USD. When a value is unavailable, the report states the reason instead of showing a bare N/A.',
 ].join('\n');
 
 state.research.one_time_items = oneTimeFlags;
