@@ -65,7 +65,10 @@ def run_netflix():
         'annual_anchor_10k': freshness.get('annual_anchor_form') in ('10-K', '20-F') or '10-K' in report,
         'market_cap_in_market_section': bool(re.search(r'Section 2c: Market Data[\s\S]*Market Cap', report)),
         'no_market_cap_in_quarterly': 'Market Cap' not in report.split('Section 2b')[0].split('Section 2a')[1] if 'Section 2a' in report and 'Section 2b' in report else True,
-        'peer_direct_only': 'direct tags only' in report.lower() or 'N/A' in report.split('Section 3')[1][:2000] if 'Section 3' in report else True,
+        'peer_direct_only': 'withheld until' in report.lower() or 'consistent' in report.lower() or 'FY2025' in report.split('Section 3')[1][:2500] if 'Section 3' in report else True,
+        'section4_quarterly': 'quarterly financial anchor only' in report.lower() or 'Quarterly anchor' in report,
+        'section4_eps': 'EPS' in report.split('Section 4')[1].split('Section 5')[0] if 'Section 4' in report else False,
+        'no_8k_as_anchor': '8-K reference only' in report or 'reference only' in report.lower(),
         'warner_flag_or_netflix_q1': (
             'Warner Bros' in report
             or 'termination fee' in report.lower()

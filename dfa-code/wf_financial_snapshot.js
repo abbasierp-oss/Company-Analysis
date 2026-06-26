@@ -163,7 +163,7 @@ const marketRows = [
     label: 'Market Cap',
     value_display: market.market_cap_usd != null ? fmtUsdValue(market.market_cap_usd) : 'N/A',
     reporting_period: market.source_date || 'latest',
-    source: market.source_name || 'Market data',
+    source: market.math_note || market.source_name || 'Market data',
   },
   {
     label: 'Share Price',
@@ -176,6 +176,12 @@ const marketRows = [
     value_display: market.shares_outstanding != null ? Number(market.shares_outstanding).toLocaleString('en-US') : 'N/A',
     reporting_period: market.shares_filed || market.source_date || 'latest',
     source: market.shares_source || 'SEC DEI / Yahoo Finance',
+  },
+  {
+    label: 'Implied Shares (market cap ÷ price)',
+    value_display: market.implied_shares_outstanding != null ? Number(market.implied_shares_outstanding).toLocaleString('en-US', { maximumFractionDigits: 0 }) : 'N/A',
+    reporting_period: market.source_date || 'latest',
+    source: market.math_consistent ? 'Verified consistent with shares outstanding' : 'Reconciled from price × shares',
   },
 ];
 

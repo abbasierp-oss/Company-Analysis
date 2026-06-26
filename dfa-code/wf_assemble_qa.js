@@ -97,7 +97,7 @@ const citationQa = {
   annual_table_ready: Boolean(state.financial_snapshot?.annual?.rows?.length),
   market_data_separated: Boolean(state.financial_snapshot?.market_data?.rows?.length || state.sections.s2_market_data),
   ratio_dashboard_ready: Boolean(state.ratio_dashboard?.annual?.length || state.sections.s5_ratios),
-  peer_benchmark_ready: Boolean(state.peer_benchmarks?.peers?.some((p) => p.source_status === 'SEC_PEER_FACTS_OK')),
+  peer_benchmark_ready: Boolean(state.peer_benchmarks?.table_published),
   value_realization_ready: Boolean(state.sections.s9_sales),
   proposal_ready: Boolean(state.sections.s6_proposal),
   data_freshness_recorded: Boolean(freshness.fetched_at),
@@ -105,7 +105,7 @@ const citationQa = {
   gap_count: state.normalized?.source_coverage?.gap_count || (state.normalized?.gaps || []).length,
   warning_notes: [],
 };
-if (!citationQa.peer_benchmark_ready) citationQa.warning_notes.push('No SEC-backed peer metrics in this run.');
+if (!citationQa.peer_benchmark_ready) citationQa.warning_notes.push('Peer table withheld or incomplete — core FY metrics not populated consistently.');
 if (!citationQa.data_freshness_recorded) citationQa.warning_notes.push('Data freshness stamp missing.');
 if (!citationQa.filing_anchors_recorded) citationQa.warning_notes.push('Filing anchors missing.');
 if ((state.normalized?.gaps || []).length > 8) citationQa.warning_notes.push('High gap count — verify issuer profile and SEC form coverage.');

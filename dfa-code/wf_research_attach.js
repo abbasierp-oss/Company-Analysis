@@ -31,7 +31,10 @@ try {
     asOf,
   });
   sharesOutstanding = shareInfo?.value || null;
-  if (sharePrice && sharesOutstanding) marketCap = sharePrice * sharesOutstanding;
+  const reconciled = reconcileMarketData(sharePrice, sharesOutstanding, sharePrice && sharesOutstanding ? sharePrice * sharesOutstanding : null);
+  sharePrice = reconciled.share_price_usd;
+  sharesOutstanding = reconciled.shares_outstanding;
+  marketCap = reconciled.market_cap_usd;
   const adrNote = state.entity?.is_foreign_issuer ? ' ADR/local listing price used.' : '';
   state.research.market_data = {
     source_name: sharesOutstanding
@@ -43,10 +46,13 @@ try {
     share_price_usd: sharePrice,
     share_price_currency: 'USD',
     shares_outstanding: sharesOutstanding,
+    implied_shares_outstanding: reconciled.implied_shares_outstanding,
     shares_source: shareInfo?.source || null,
     shares_filed: shareInfo?.filed || null,
     market_cap_usd: marketCap,
-    confidence: marketCap ? (shareInfo?.confidence === 'HIGH' ? 'MEDIUM' : 'LOW') : (sharePrice ? 'LOW' : 'N/A'),
+    math_consistent: reconciled.math_consistent,
+    math_note: reconciled.math_note,
+    confidence: marketCap ? (reconciled.math_consistent && shareInfo?.confidence === 'HIGH' ? 'MEDIUM' : 'LOW') : (sharePrice ? 'LOW' : 'N/A'),
     fetched_at: now,
     adr_note: state.entity?.is_foreign_issuer ? 'Foreign issuer: market cap uses listing price x best available share count (USD).' : null,
   };
@@ -78,8 +84,10 @@ state.data_freshness = {
   annual_anchor_report_date: fyAnchor?.report_date || null,
   recent_8k_form: ref8k?.form || null,
   recent_8k_filing_date: ref8k?.filing_date || null,
-  latest_filing_form: ref8k?.form || qAnchor?.form || fyAnchor?.form || null,
-  latest_filing_date: ref8k?.filing_date || qAnchor?.filing_date || fyAnchor?.filing_date || null,
+  operating_filing_form: qAnchor?.form || fyAnchor?.form || null,
+  operating_filing_date: qAnchor?.filing_date || fyAnchor?.filing_date || null,
+  latest_filing_form: qAnchor?.form || fyAnchor?.form || null,
+  latest_filing_date: qAnchor?.filing_date || fyAnchor?.filing_date || null,
   latest_report_date: qAnchor?.report_date || fyAnchor?.report_date || null,
   sec_company_facts_url: state.research?.financials?.source_url || null,
   market_price_as_of: state.research?.market_data?.source_date || null,

@@ -93,27 +93,28 @@ const quarterly = [
   { label: 'Net Margin', formula: 'Net income / revenue', value: safeRatio(qNet, qRevenue, true), reporting_period: qAnchor?.report_date || qPeriod },
 ];
 
+const fyLabel = fyAnchor ? `FY${fyAnchor.fy || 2025}` : 'FY2025';
 const fyAnchorNote = fyAnchor
-  ? `FY2025 column anchored on ${fyAnchor.form} (report period ${fyAnchor.report_date || 'N/A'}).`
-  : 'FY2025 uses latest available annual SEC facts.';
+  ? `Annual ratios below are ${fyLabel} / FY2024 / FY2023 only — not quarterly. ${fyLabel} column anchored on ${fyAnchor.form} (report period ${fyAnchor.report_date || 'N/A'}).`
+  : 'Annual ratios below are FY2025 / FY2024 / FY2023 only — not quarterly.';
 const markdown = [
   '## Section 5: Ratio Dashboard',
   '',
-  `### Quarterly Ratios (${qPeriod})`,
+  `### Quarterly Ratios — ${qPeriod} only (not annual)`,
   '',
   '| Ratio | Value | Reporting Period | Formula |',
   '|---|---|---|---|',
   ...quarterly.map((r) => `| ${r.label} | ${r.value} | ${r.reporting_period} | ${r.formula} |`),
   '',
-  '### Annual Ratios',
+  `### Annual Ratios — ${fyLabel}, FY2024, FY2023 (not quarterly)`,
   '',
   fyAnchorNote,
   '',
-  '| Ratio | FY2025 | FY2024 | FY2023 | Formula |',
+  `| Ratio | ${fyLabel} | FY2024 | FY2023 | Formula |`,
   '|---|---|---|---|---|',
   ...annual.map((r) => `| ${r.label} | ${r.values[0]} | ${r.values[1]} | ${r.values[2]} | ${r.formula} |`),
   '',
-  'Notes: All ratios use SEC EDGAR line items converted to USD. Values are rounded to 1–2 decimal places. N/A means required inputs were missing on the anchored filing.',
+  'Notes: Quarterly and annual ratio blocks are separate. All values use SEC EDGAR line items converted to USD and are rounded to 1–2 decimal places.',
 ].join('\n');
 
 state.ratio_dashboard = { generated_at: now, quarterly, annual, markdown };

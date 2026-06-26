@@ -11,7 +11,7 @@ return [{ json: {
       max_tokens: 3500,
       temperature: 0.45,
       system,
-      messages: [{ role: 'user', content: `Produce valid JSON only with key section_4_insights_markdown. Write exactly three strategic insights using SEC-backed metrics and peer_benchmarks table. Each insight must include Damodaran take, expert take, and so-what.\n\nINPUT_JSON:\n${JSON.stringify(dataPack).slice(0, 100000)}` }],
+      messages: [{ role: 'user', content: `Produce valid JSON only with key section_4_insights_markdown. Write exactly three strategic insights using ONLY the quarterly financial anchor metrics from financial_snapshot.quarterly (not annual normalized metrics). Use revenue, operating margin, FCF, and EPS from the quarterly anchor period only. Label every figure with its reporting period. Do not cite 8-K as a financial anchor; 8-K is reference-only. Each insight must include Damodaran take, expert take, and so-what.\n\nINPUT_JSON:\n${JSON.stringify(dataPack).slice(0, 100000)}` }],
     },
     s7: {
       model: 'claude-sonnet-4-6',

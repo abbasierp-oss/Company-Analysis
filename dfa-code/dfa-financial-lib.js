@@ -346,12 +346,14 @@ function resolveFilingAnchors(recentFilings, issuerProfile) {
   const interimForms = issuerProfile?.interim_forms || SEC_INTERIM_FORMS;
   function pick(forms) {
     return filings
-      .filter((f) => forms.includes(f.form))
+      .filter((f) => forms.includes(f.form) && f.form !== '8-K')
       .sort((a, b) => String(b.report_date || b.filing_date || '').localeCompare(String(a.report_date || a.filing_date || '')))[0] || null;
   }
   const quarterly = pick(interimForms);
   const annual = pick(annualForms);
-  const recent8k = pick(['8-K']);
+  const recent8k = filings
+    .filter((f) => f.form === '8-K')
+    .sort((a, b) => String(b.filing_date || b.report_date || '').localeCompare(String(a.filing_date || a.report_date || '')))[0] || null;
   return {
     quarterly_10q: quarterly,
     annual_10k: annual,
@@ -468,6 +470,181 @@ function oneTimeFlagForMetric(flags, metricId, periodLabel) {
   }) || null;
 }
 
+const CORE_PEER_METRICS = ['Revenue', 'Gross Margin', 'Operating Margin', 'Net Margin', 'FCF Margin', 'Current Ratio'];
+
+function snapshotMetricValue(state, section, metricId) {
+  const rows = state.financial_snapshot?.[section]?.rows || [];
+  const row = rows.find((r) => r.metric === metricId);
+  if (!row?.raw || row.raw.value === null || row.raw.value === undefined) return null;
+  return {
+    value: Number(row.raw.value),
+    unit: row.raw.unit,
+    reporting_period: row.reporting_period,
+    period_label: state.financial_snapshot?.[section]?.period_label || row.reporting_period,
+    one_time_flag: row.raw.one_time_flag || null,
+    source_name: row.raw.source_name || null,
+  };
+}
+
+function getQuarterlyAnchorMetrics(state) {
+  const qAnchor = state.research?.filing_anchors?.quarterly_10q;
+  const periodLabel = state.financial_snapshot?.quarterly?.period_label || anchorPeriodLabel(qAnchor);
+  const fromSnapshot = {
+    period_label: periodLabel,
+    reporting_period: qAnchor?.report_date || periodLabel,
+    revenue: snapshotMetricValue(state, 'quarterly', 'revenue'),
+    operating_margin: snapshotMetricValue(state, 'quarterly', 'operating_margin'),
+    net_margin: snapshotMetricValue(state, 'quarterly', 'net_margin'),
+    net_income: snapshotMetricValue(state, 'quarterly', 'net_income'),
+    free_cash_flow: snapshotMetricValue(state, 'quarterly', 'free_cash_flow'),
+    eps: snapshotMetricValue(state, 'quarterly', 'eps'),
+  };
+  if (fromSnapshot.revenue) return fromSnapshot;
+  const facts = state.research?.financials?.merged_facts || state.research?.financials?.raw_us_gaap_facts || {};
+  const fx = state.research?.financials?.fx_to_usd || {};
+  const native = state.research?.financials?.native_currency || 'USD';
+  if (!qAnchor) return fromSnapshot;
+  const revenue = metricAtAnchor(facts, 'revenue', qAnchor, fx, native);
+  const op = metricAtAnchor(facts, 'operating_income', qAnchor, fx, native);
+  const ocf = metricAtAnchor(facts, 'operating_cash_flow', qAnchor, fx, native);
+  const capex = metricAtAnchor(facts, 'capex', qAnchor, fx, native);
+  const eps = metricAtAnchor(facts, 'diluted_eps', qAnchor, fx, native);
+  const opMarginVal = revenue && op && revenue.value ? op.value / revenue.value : null;
+  const fcfVal = ocf && capex ? ocf.value - capex.value : null;
+  return {
+    period_label: periodLabel,
+    reporting_period: qAnchor.report_date || periodLabel,
+    revenue: revenue ? { value: revenue.value, unit: 'USD', reporting_period: revenue.reporting_period, period_label: periodLabel } : null,
+    operating_margin: opMarginVal !== null ? { value: opMarginVal, unit: 'ratio', reporting_period: revenue?.reporting_period, period_label: periodLabel } : null,
+    free_cash_flow: fcfVal !== null ? { value: fcfVal, unit: 'USD', reporting_period: ocf?.reporting_period, period_label: periodLabel } : null,
+    eps: eps ? { value: eps.value, unit: 'USD/shares', reporting_period: eps.reporting_period, period_label: periodLabel } : null,
+  };
+}
+
+function getAnnualAnchorMetrics(state) {
+  const fyAnchor = state.research?.filing_anchors?.annual_10k;
+  const periodLabel = state.financial_snapshot?.annual?.period_label || anchorPeriodLabel(fyAnchor);
+  const fromSnapshot = {
+    period_label: periodLabel,
+    reporting_period: fyAnchor?.report_date || periodLabel,
+    revenue: snapshotMetricValue(state, 'annual', 'revenue'),
+    operating_margin: snapshotMetricValue(state, 'annual', 'operating_margin'),
+    net_margin: snapshotMetricValue(state, 'annual', 'net_margin'),
+    net_income: snapshotMetricValue(state, 'annual', 'net_income'),
+    free_cash_flow: snapshotMetricValue(state, 'annual', 'free_cash_flow'),
+    eps: snapshotMetricValue(state, 'annual', 'eps'),
+  };
+  if (fromSnapshot.revenue) return fromSnapshot;
+  const facts = state.research?.financials?.merged_facts || state.research?.financials?.raw_us_gaap_facts || {};
+  const fx = state.research?.financials?.fx_to_usd || {};
+  const native = state.research?.financials?.native_currency || 'USD';
+  const anchor = fyAnchor ? { ...fyAnchor, fp: 'FY' } : null;
+  if (!anchor) return fromSnapshot;
+  const revenue = metricAtAnchor(facts, 'revenue', anchor, fx, native);
+  const op = metricAtAnchor(facts, 'operating_income', anchor, fx, native);
+  const ocf = metricAtAnchor(facts, 'operating_cash_flow', anchor, fx, native);
+  const capex = metricAtAnchor(facts, 'capex', anchor, fx, native);
+  return {
+    period_label: periodLabel,
+    reporting_period: fyAnchor.report_date || periodLabel,
+    revenue: revenue ? { value: revenue.value, unit: 'USD', reporting_period: revenue.reporting_period, period_label: periodLabel } : null,
+    operating_margin: revenue && op && revenue.value ? { value: op.value / revenue.value, unit: 'ratio', reporting_period: revenue.reporting_period, period_label: periodLabel } : null,
+    free_cash_flow: ocf && capex ? { value: ocf.value - capex.value, unit: 'USD', reporting_period: ocf.reporting_period, period_label: periodLabel } : null,
+  };
+}
+
+function formatQuarterlyMetric(metric, kind) {
+  if (!metric || metric.value === null || metric.value === undefined) return 'N/A';
+  const period = metric.period_label || metric.reporting_period || 'quarterly anchor';
+  const flag = metric.one_time_flag ? ` ⚠ ${metric.one_time_flag}` : '';
+  if (kind === 'pct' || metric.unit === 'ratio') return `${fmtPct(metric.value)} (${period})${flag}`;
+  if (kind === 'eps' || metric.unit === 'USD/shares') return `${fmtEps(metric.value)} (${period})${flag}`;
+  return `${fmtUsdValue(metric.value)} (${period})${flag}`;
+}
+
+function formatAnnualMetric(metric, kind) {
+  if (!metric || metric.value === null || metric.value === undefined) return 'N/A';
+  const period = metric.period_label || metric.reporting_period || 'FY2025';
+  if (kind === 'pct' || metric.unit === 'ratio') return `${fmtPct(metric.value)} (${period})`;
+  if (kind === 'eps' || metric.unit === 'USD/shares') return `${fmtEps(metric.value)} (${period})`;
+  return `${fmtUsdValue(metric.value)} (${period})`;
+}
+
+function reconcileMarketData(sharePrice, sharesOutstanding, reportedMarketCap) {
+  const price = sharePrice !== null && sharePrice !== undefined ? Number(sharePrice) : null;
+  const shares = sharesOutstanding !== null && sharesOutstanding !== undefined ? Number(sharesOutstanding) : null;
+  if (!price || !shares) {
+    return {
+      share_price_usd: price,
+      shares_outstanding: shares,
+      market_cap_usd: reportedMarketCap !== null && reportedMarketCap !== undefined ? Number(reportedMarketCap) : null,
+      implied_shares_outstanding: null,
+      math_consistent: false,
+      math_note: 'Insufficient price or share count to verify market cap math.',
+    };
+  }
+  const marketCap = price * shares;
+  const impliedShares = marketCap / price;
+  const reported = reportedMarketCap !== null && reportedMarketCap !== undefined ? Number(reportedMarketCap) : null;
+  const capDrift = reported && reported > 0 ? Math.abs(marketCap - reported) / reported : 0;
+  const shareDrift = Math.abs(impliedShares - shares) / shares;
+  const consistent = capDrift < 0.01 && shareDrift < 0.01;
+  return {
+    share_price_usd: price,
+    shares_outstanding: shares,
+    market_cap_usd: marketCap,
+    implied_shares_outstanding: impliedShares,
+    math_consistent: consistent,
+    math_note: `Verified: market_cap (${fmtUsdValue(marketCap)}) = share_price (${fmtUsdValue(price)}) × shares (${shares.toLocaleString('en-US')}).`,
+  };
+}
+
+function annualFactValue(facts, metricKey, fy, fx, native) {
+  const direct = peerMetricDirectOnly(facts, metricKey, fy, fx, native);
+  return direct ? direct.value : null;
+}
+
+function computePeerMetricsFromFacts(facts, fy, fx, native) {
+  const revenue = annualFactValue(facts, 'revenue', fy, fx, native);
+  const gross = annualFactValue(facts, 'gross_profit', fy, fx, native);
+  const op = annualFactValue(facts, 'operating_income', fy, fx, native);
+  const net = annualFactValue(facts, 'net_income', fy, fx, native);
+  const ocf = annualFactValue(facts, 'operating_cash_flow', fy, fx, native);
+  const capex = annualFactValue(facts, 'capex', fy, fx, native);
+  const ca = annualFactValue(facts, 'current_assets', fy, fx, native);
+  const cl = annualFactValue(facts, 'current_liabilities', fy, fx, native);
+  const interest = annualFactValue(facts, 'interest_expense', fy, fx, native);
+  const debt = annualFactValue(facts, 'long_term_debt', fy, fx, native);
+  const equity = annualFactValue(facts, 'equity', fy, fx, native);
+  const assets = annualFactValue(facts, 'assets', fy, fx, native);
+  const cash = annualFactValue(facts, 'cash', fy, fx, native);
+  const dep = annualFactValue(facts, 'depreciation', fy, fx, native);
+  const revY1 = annualFactValue(facts, 'revenue', fy - 1, fx, native);
+  const revY3 = annualFactValue(facts, 'revenue', fy - 3, fx, native);
+  const safeDiv = (a, b) => (a !== null && b !== null && b !== 0 ? a / b : null);
+  const fcf = ocf !== null && capex !== null ? ocf - capex : null;
+  const ebitda = op !== null && dep !== null ? op + dep : null;
+  return {
+    Revenue: revenue !== null ? fmtUsdValue(revenue) : 'N/A',
+    'Gross Margin': safeDiv(gross, revenue) !== null ? fmtPct(safeDiv(gross, revenue)) : 'N/A',
+    'Operating Margin': safeDiv(op, revenue) !== null ? fmtPct(safeDiv(op, revenue)) : 'N/A',
+    'Net Margin': safeDiv(net, revenue) !== null ? fmtPct(safeDiv(net, revenue)) : 'N/A',
+    'FCF Margin': safeDiv(fcf, revenue) !== null ? fmtPct(safeDiv(fcf, revenue)) : 'N/A',
+    'Current Ratio': safeDiv(ca, cl) !== null ? fmtRatio(safeDiv(ca, cl)) : 'N/A',
+    'YoY Revenue Growth': safeDiv(revenue && revY1 ? revenue - revY1 : null, revY1) !== null ? fmtPct(safeDiv(revenue - revY1, revY1)) : 'N/A',
+    '3-Year Revenue CAGR': revY3 && revenue && revY3 > 0 ? fmtPct(Math.pow(revenue / revY3, 1 / 3) - 1) : 'N/A',
+    'Net Debt / EBITDA': ebitda && debt !== null && cash !== null && ebitda !== 0 ? fmtRatio((debt - cash) / ebitda) : 'N/A',
+    'Interest Coverage': safeDiv(op, interest) !== null ? fmtRatio(safeDiv(op, interest)) : 'N/A',
+    'ROCE/ROIC': safeDiv(op, assets !== null && cl !== null ? assets - cl : null) !== null ? fmtPct(safeDiv(op, assets - cl)) : 'N/A',
+    'Asset Turnover': safeDiv(revenue, assets) !== null ? fmtRatio(safeDiv(revenue, assets)) : 'N/A',
+    _fy: fy,
+  };
+}
+
+function peerRowHasCoreMetrics(metrics) {
+  return CORE_PEER_METRICS.every((key) => metrics[key] && metrics[key] !== 'N/A');
+}
+
 function entityConfidence(entity, normalized) {
   const gaps = normalized?.gaps?.length || 0;
   const metrics = normalized?.source_coverage?.metrics_with_values || 0;
@@ -514,35 +691,36 @@ function parseClaudeJson(response) {
 }
 
 function buildDeterministicInsights(state) {
-  const m = state.normalized?.metrics || {};
-  function latest(name) {
-    const s = m[name] || [];
-    return Array.isArray(s) && s.length ? s[s.length - 1] : null;
-  }
-  const revenue = latest('revenue');
-  const opMargin = latest('operating_margin');
-  const fcf = latest('free_cash_flow');
+  const q = getQuarterlyAnchorMetrics(state);
+  const period = q.period_label || 'Quarterly anchor';
   const issuer = state.entity?.issuer_profile?.description || 'public company';
-  const fx = state.research?.financials?.fx_to_usd;
-  const native = state.entity?.native_reporting_currency || 'USD';
+  const ref8k = state.data_freshness?.recent_8k_form;
+  const ref8kDate = state.data_freshness?.recent_8k_filing_date;
+  const peerReady = state.peer_benchmarks?.table_published === true;
   return [
     '## Section 4: Three Strategic Insights',
     '',
+    `All figures below use the quarterly financial anchor only (${period}; report period ${q.reporting_period || 'N/A'}).`,
+    '',
     '### Insight 1 — Cash-flow quality and reinvestment',
-    `- Revenue (latest): ${revenue ? fmtUsdValue(revenue.value) : 'N/A'}`,
-    `- Operating margin: ${opMargin ? fmtPct(opMargin.value) : 'N/A'}`,
-    `- FCF: ${fcf ? fmtUsdValue(fcf.value) : 'N/A'}`,
+    `- Revenue: ${formatQuarterlyMetric(q.revenue)}`,
+    `- Operating margin: ${formatQuarterlyMetric(q.operating_margin, 'pct')}`,
+    `- FCF: ${formatQuarterlyMetric(q.free_cash_flow)}`,
+    `- EPS: ${formatQuarterlyMetric(q.eps, 'eps')}`,
     `- Damodaran take: Sustainable value creation depends on whether growth is backed by reinvestment and cash conversion, not headline revenue alone.`,
     `- So-what: ${state.inputs?.exec_type || 'Executive'} should prioritize the metric with the weakest source-backed trend before approving new spend.`,
     '',
     '### Insight 2 — Risk, leverage, and cost of capital',
     `- Issuer profile: ${issuer}`,
-    `- Peer benchmark table in Section 3 provides relative margin and liquidity context.`,
+    peerReady
+      ? '- Peer benchmark table in Section 3 uses FY2025 annual SEC facts on a consistent basis.'
+      : '- Peer benchmark table withheld until all core FY2025 metrics can be populated consistently.',
     `- Damodaran take: Risk is not abstract; it shows up in leverage, coverage, and earnings volatility versus peers.`,
     `- So-what: If leverage or margin trails peers, the strategic plan must explain the path to convergence or justify a premium/discount.`,
     '',
     '### Insight 3 — Narrative vs filings',
-    `- Latest filing context is in Section 7 and data freshness stamp: ${state.data_freshness?.latest_filing_form || 'N/A'} (${state.data_freshness?.latest_filing_date || 'N/A'})`,
+    `- Quarterly anchor: ${state.data_freshness?.quarterly_anchor_form || 'N/A'} (${state.data_freshness?.quarterly_anchor_report_date || 'N/A'})`,
+    ref8k ? `- Recent 8-K reference only (not a financial anchor): ${ref8k} filed ${ref8kDate || 'N/A'}` : '- No recent 8-K on file.',
     `- Damodaran take: Markets price expected future cash flows; filings and interim reports test whether the narrative is credible.`,
     `- So-what: Tie every strategic claim to a filing-backed metric or explicitly mark it N/A.`,
   ].join('\n');
