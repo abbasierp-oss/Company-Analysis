@@ -9,10 +9,10 @@ const period = q.period_label || 'Quarterly anchor';
 const market = state.research?.market_data || {};
 const peerPublished = state.peer_benchmarks?.table_published === true;
 const signals = [
-  { insight: 'Margin and cash-flow visibility drive value more than headline growth.', value: `Operating margin ${formatQuarterlyMetric(q.operating_margin, 'pct')}; FCF ${formatQuarterlyMetric(q.free_cash_flow)} (${period})`, idea: `${provider} builds KPI governance around source-cited drivers.`, proof: 'Validate with margin bridge and FCF bridge on the quarterly anchor.', hook: `${execType} sees which actions move cash flow.` },
+  { insight: 'Margin and cash-flow visibility drive value more than headline growth.', value: `Operating margin ${formatQuarterlyMetric(q.operating_margin, 'pct')}; FCF ${formatQuarterlyMetric(q.free_cash_flow)}.`, idea: `${provider} builds KPI governance around source-cited drivers.`, proof: 'Validate with margin bridge and FCF bridge on the quarterly anchor.', hook: `${execType} sees which actions move cash flow.` },
   { insight: 'Peer gaps reveal structural vs execution issues.', value: peerPublished ? `FY${state.peer_benchmarks?.benchmark_fy || 2025} peer table in Section 3 with consistent SEC methodology.` : 'Peer table withheld until core FY metrics are complete across peers.', idea: `${provider} targets the largest peer-underperformance areas.`, proof: 'Reconcile peer table vs internal KPI owners.', hook: `${execType} can prioritize the biggest credibility gap.` },
-  { insight: 'Quarterly filing cadence reduces decision latency.', value: `Quarterly anchor ${state.data_freshness?.quarterly_anchor_form || 'N/A'} (${state.data_freshness?.quarterly_anchor_report_date || 'N/A'})`, idea: `${provider} automates close-to-insight reporting.`, proof: 'Compare close cycle and dashboard latency.', hook: `${execType} gets current numbers, not stale spreadsheets.` },
-  { insight: 'Working-capital discipline converts profit to cash.', value: `FCF ${formatQuarterlyMetric(q.free_cash_flow)} (${period})`, idea: `${provider} order-to-cash and procure-to-pay programs.`, proof: 'Aging, billing cycle, supplier terms review.', hook: `${execType} can frame cash release without revenue growth.` },
+  { insight: 'Quarterly filing cadence reduces decision latency.', value: `Quarterly anchor ${state.data_freshness?.quarterly_anchor_form || 'N/A'} (${state.data_freshness?.quarterly_anchor_report_date || 'N/A'}).`, idea: `${provider} automates close-to-insight reporting.`, proof: 'Compare close cycle and dashboard latency.', hook: `${execType} gets current numbers, not stale spreadsheets.` },
+  { insight: 'Working-capital discipline converts profit to cash.', value: `FCF ${formatQuarterlyMetric(q.free_cash_flow)}.`, idea: `${provider} order-to-cash and procure-to-pay programs.`, proof: 'Aging, billing cycle, supplier terms review.', hook: `${execType} can frame cash release without revenue growth.` },
   { insight: 'Market cap context frames strategic urgency.', value: market.market_cap_usd != null ? `${fmtUsdValue(market.market_cap_usd)} (${market.source_date || 'latest'})` : 'N/A for private or unavailable price', idea: `${provider} links initiatives to valuation-sensitive metrics.`, proof: market.math_note || 'Verify price x shares = market cap.', hook: `${execType} aligns operators with capital markets story.` },
 ];
 const hypotheses = [
@@ -46,7 +46,7 @@ const markdown = [
   '### D) One-slide Sales Narrative',
   narrative,
 ].join('\n\n');
-state.value_realization = { generated_at: now, markdown, source: 'enhanced_rule_based_v3' };
+state.value_realization = { generated_at: now, markdown, source: 'enhanced_rule_based_v4' };
 state.sections = state.sections || {};
 state.sections.s9_sales = markdown;
 state.audit_log = state.audit_log || [];

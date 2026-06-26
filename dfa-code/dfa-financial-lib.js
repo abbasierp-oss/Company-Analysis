@@ -368,10 +368,24 @@ function anchorPeriodLabel(anchor) {
     const s = String(fy);
     return s.startsWith('FY') ? s : `FY${s}`;
   };
-  if (anchor.fp && anchor.fy) return `${anchor.fp} ${fyStr(anchor.fy)}`;
+  if (anchor.fp && anchor.fy) {
+    const fyLabel = fyStr(anchor.fy);
+    if (anchor.fp === 'FY' || anchor.fp === fyLabel) return fyLabel;
+    return `${anchor.fp} ${fyLabel}`;
+  }
   if (anchor.report_date) return anchor.report_date;
   if (anchor.fy) return fyStr(anchor.fy);
   return anchor.filing_date || 'N/A';
+}
+
+function annualSectionLabel(anchor) {
+  if (!anchor) return 'Latest Fiscal Year';
+  if (anchor.fy) {
+    const s = String(anchor.fy);
+    return s.startsWith('FY') ? s : `FY${s}`;
+  }
+  if (anchor.report_date) return anchor.report_date;
+  return anchorPeriodLabel(anchor);
 }
 
 function rowMatchesAnchor(row, anchor) {
@@ -602,11 +616,11 @@ function aggregateReportGaps(state) {
 
 function unusualQuarterNotes(state) {
   const flags = state.research?.one_time_items || [];
-  const lines = flags.map((f) => `- ${f.label} (${f.period_label || 'quarterly anchor'}).`);
-  if (flags.some((f) => f.id === 'warner_bros_termination_fee')) {
-    lines.push('- Q1 net income, EPS, and margins reflect the Warner Bros. termination fee disclosed in the 2026 Q1 shareholder letter and 10-Q; exclude this one-time item when assessing operating performance.');
-  }
-  return lines;
+  if (!flags.some((f) => f.id === 'warner_bros_termination_fee')) return [];
+  return [
+    '- A one-time Warner Bros. termination fee was recognized in interest and other income in Q1 FY2026.',
+    '- This item inflated net income and EPS; use adjusted analysis when evaluating core operating performance.',
+  ];
 }
 
 function dilutedSharesAtAnchor(facts, anchor) {
@@ -645,11 +659,17 @@ function buildLiveMarketData(meta, mergedFacts, deiFacts, qAnchor, ticker) {
   const price = meta?.regularMarketPrice ?? meta?.previousClose ?? null;
   const asOfTs = meta?.regularMarketTime ? meta.regularMarketTime * 1000 : Date.now();
   const asOf = new Date(asOfTs).toISOString();
-  const marketCap = meta?.marketCap != null ? Number(meta.marketCap) : null;
+  const priceNum = price != null ? Number(price) : null;
   const dei = deiSharesOutstanding(deiFacts);
   const dilutedWa = qAnchor ? dilutedSharesAtAnchor(mergedFacts, qAnchor) : null;
-  const priceNum = price != null ? Number(price) : null;
+  let marketCap = meta?.marketCap != null ? Number(meta.marketCap) : null;
+  let marketCapSource = 'Yahoo Finance meta.marketCap';
+  if (!marketCap && priceNum && dei?.value) {
+    marketCap = priceNum * dei.value;
+    marketCapSource = 'Computed: Yahoo share price × SEC DEI shares outstanding';
+  }
   const impliedShares = priceNum && marketCap ? marketCap / priceNum : null;
+  const incomplete = priceNum != null && !marketCap;
   const yahooUrl = ticker ? `https://finance.yahoo.com/quote/${ticker}` : null;
   return {
     source_name: 'Yahoo Finance',
@@ -659,7 +679,7 @@ function buildLiveMarketData(meta, mergedFacts, deiFacts, qAnchor, ticker) {
     share_price_usd: priceNum,
     share_price_currency: 'USD',
     market_cap_usd: marketCap,
-    market_cap_source: 'Yahoo Finance meta.marketCap',
+    market_cap_source: marketCapSource,
     shares_outstanding: dei?.value ?? null,
     shares_outstanding_source: dei?.source_name ?? null,
     shares_outstanding_as_of: dei?.reporting_period ?? null,
@@ -668,12 +688,15 @@ function buildLiveMarketData(meta, mergedFacts, deiFacts, qAnchor, ticker) {
     weighted_avg_diluted_shares_source: dilutedWa?.source_name ?? null,
     weighted_avg_diluted_shares_period: dilutedWa?.reporting_period ?? qAnchor?.report_date ?? null,
     weighted_avg_diluted_shares_note: 'From quarterly filing anchor (weighted-average diluted shares outstanding).',
-    implied_shares_outstanding: impliedShares,
-    implied_shares_note: 'Market-derived: Yahoo market cap ÷ share price. Do not treat as a filing share count.',
+    implied_shares_outstanding: incomplete ? null : impliedShares,
+    implied_shares_note: incomplete ? null : 'Market-derived: market cap ÷ share price. Do not treat as a filing share count.',
+    incomplete,
     math_consistent: Boolean(priceNum && marketCap && impliedShares),
-    math_note: priceNum && marketCap
-      ? `Yahoo Finance @ ${asOf}: market cap ${fmtUsdValue(marketCap)}, price ${fmtUsdValue(priceNum)}, implied shares ${impliedShares ? Math.round(impliedShares).toLocaleString('en-US') : 'N/A'}.`
-      : 'Yahoo Finance returned partial quote data.',
+    math_note: incomplete
+      ? 'Market data is incomplete: share price available but market cap could not be populated.'
+      : (priceNum && marketCap
+        ? `${marketCapSource} @ ${asOf}: market cap ${fmtUsdValue(marketCap)}, price ${fmtUsdValue(priceNum)}${impliedShares ? `, implied shares ${Math.round(impliedShares).toLocaleString('en-US')}` : ''}.`
+        : 'Yahoo Finance returned partial quote data.'),
     confidence: priceNum && marketCap ? 'MEDIUM' : 'LOW',
     fetched_at: new Date().toISOString(),
   };

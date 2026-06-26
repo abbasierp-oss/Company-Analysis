@@ -28,7 +28,7 @@ function enrichAnchor(anchor) {
 const qAnchor = enrichAnchor(anchors.quarterly_10q);
 const fyAnchor = enrichAnchor(anchors.annual_10k);
 const qPeriodLabel = qAnchor ? anchorPeriodLabel(qAnchor) : 'Latest Quarter';
-const fyPeriodLabel = fyAnchor ? anchorPeriodLabel(fyAnchor) : 'Latest Fiscal Year';
+const fyPeriodLabel = fyAnchor ? annualSectionLabel(fyAnchor) : 'Latest Fiscal Year';
 
 function computedMetric(num, den, unit, formula, periodMeta, flagMetricId, periodLabel) {
   if (!num || !den || den.value === null || den.value === undefined || Number(den.value) === 0) return null;
@@ -170,38 +170,58 @@ const annualRows = [
 ];
 
 const market = state.research?.market_data || {};
-const marketRows = [
-  {
-    label: 'Market Cap (Yahoo Finance)',
-    value_display: market.market_cap_usd != null ? fmtUsdValue(market.market_cap_usd) : 'N/A',
-    reporting_period: market.source_date || 'latest',
-    source: `${market.market_cap_source || 'Yahoo Finance meta.marketCap'} @ ${market.source_date || 'N/A'}`,
-  },
-  {
-    label: 'Share Price (Yahoo Finance)',
-    value_display: market.share_price_usd != null ? fmtUsdValue(market.share_price_usd) : 'N/A',
-    reporting_period: market.source_date || 'latest',
-    source: `Yahoo Finance @ ${market.source_date || 'N/A'}`,
-  },
-  {
-    label: 'Shares Outstanding (DEI, point-in-time)',
-    value_display: market.shares_outstanding != null ? Number(market.shares_outstanding).toLocaleString('en-US') : 'N/A',
-    reporting_period: market.shares_outstanding_as_of || 'N/A',
-    source: market.shares_outstanding_source || 'SEC DEI',
-  },
-  {
-    label: 'Weighted-Avg Diluted Shares (10-Q anchor)',
-    value_display: market.weighted_avg_diluted_shares != null ? Number(market.weighted_avg_diluted_shares).toLocaleString('en-US') : 'N/A',
-    reporting_period: market.weighted_avg_diluted_shares_period || qAnchor?.report_date || 'N/A',
-    source: market.weighted_avg_diluted_shares_source || 'SEC EDGAR quarterly anchor',
-  },
-  {
-    label: 'Implied Shares (market cap ÷ price)',
-    value_display: market.implied_shares_outstanding != null ? Number(market.implied_shares_outstanding).toLocaleString('en-US', { maximumFractionDigits: 0 }) : 'N/A',
-    reporting_period: market.source_date || 'latest',
-    source: market.implied_shares_note || 'Market-derived; not a filing share count',
-  },
-];
+let markdownMarket;
+if (market.incomplete) {
+  markdownMarket = [
+    '## Section 2c: Market Data',
+    '',
+    'Market data is incomplete in this run; share price is available, market cap is not populated, and implied shares are not computed.',
+    '',
+    market.share_price_usd != null ? `Share price: ${fmtUsdValue(market.share_price_usd)} (${market.source_date || 'N/A'}, Yahoo Finance).` : '',
+  ].filter(Boolean).join('\n');
+} else {
+  const marketRows = [
+    {
+      label: 'Market Cap',
+      value_display: market.market_cap_usd != null ? fmtUsdValue(market.market_cap_usd) : 'N/A',
+      reporting_period: market.source_date || 'latest',
+      source: `${market.market_cap_source || 'Yahoo Finance'} @ ${market.source_date || 'N/A'}`,
+    },
+    {
+      label: 'Share Price (Yahoo Finance)',
+      value_display: market.share_price_usd != null ? fmtUsdValue(market.share_price_usd) : 'N/A',
+      reporting_period: market.source_date || 'latest',
+      source: `Yahoo Finance @ ${market.source_date || 'N/A'}`,
+    },
+    {
+      label: 'Shares Outstanding (DEI, point-in-time)',
+      value_display: market.shares_outstanding != null ? Number(market.shares_outstanding).toLocaleString('en-US') : 'N/A',
+      reporting_period: market.shares_outstanding_as_of || 'N/A',
+      source: market.shares_outstanding_source || 'SEC DEI',
+    },
+    {
+      label: 'Weighted-Avg Diluted Shares (10-Q anchor)',
+      value_display: market.weighted_avg_diluted_shares != null ? Number(market.weighted_avg_diluted_shares).toLocaleString('en-US') : 'N/A',
+      reporting_period: market.weighted_avg_diluted_shares_period || qAnchor?.report_date || 'N/A',
+      source: market.weighted_avg_diluted_shares_source || 'SEC EDGAR quarterly anchor',
+    },
+    ...(market.implied_shares_outstanding != null ? [{
+      label: 'Implied Shares (market cap ÷ price)',
+      value_display: Number(market.implied_shares_outstanding).toLocaleString('en-US', { maximumFractionDigits: 0 }),
+      reporting_period: market.source_date || 'latest',
+      source: market.implied_shares_note || 'Market-derived',
+    }] : []),
+  ];
+  markdownMarket = [
+    tableMarkdown(
+      '## Section 2c: Market Data',
+      `Single live source: Yahoo Finance @ ${market.source_date || 'N/A'}. ${market.math_note || ''}`,
+      marketRows,
+    ),
+    '',
+    'Note: Weighted-average diluted shares are for EPS calculation only and should not be used as a substitute for point-in-time shares outstanding or market-implied shares.',
+  ].join('\n');
+}
 
 function tableMarkdown(title, anchorNote, rows) {
   return [
@@ -236,13 +256,6 @@ const markdownAnnual = tableMarkdown(
   fyAnchorNote,
   annualRows,
 );
-const markdownMarket = [
-  tableMarkdown(
-    '## Section 2c: Market Data',
-    `Single live source: Yahoo Finance @ ${market.source_date || 'N/A'}. ${market.math_note || ''} Share counts below are distinct concepts — do not mix DEI shares outstanding, quarterly weighted-average diluted shares, and market-implied shares.`,
-    marketRows,
-  ),
-].join('\n');
 
 const unusualLines = unusualQuarterNotes(state);
 const markdownQuarterlyWithNotes = [
@@ -269,7 +282,7 @@ state.financial_snapshot = {
   filing_anchors: anchors,
   quarterly: { anchor: qAnchor, period_label: qPeriodLabel, rows: quarterlyRows, markdown: markdownQuarterlyWithNotes },
   annual: { anchor: fyAnchor, period_label: fyPeriodLabel, rows: annualRows, markdown: markdownAnnual },
-  market_data: { rows: marketRows, markdown: markdownMarket },
+  market_data: { markdown: markdownMarket },
   markdown,
 };
 state.sections = state.sections || {};

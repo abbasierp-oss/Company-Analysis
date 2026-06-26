@@ -72,7 +72,7 @@ def run_netflix():
         'market_cap_yahoo': 'Yahoo Finance' in report.split('Section 2c')[1][:1500] if 'Section 2c' in report else False,
         'diluted_shares_row': 'Weighted-Avg Diluted Shares' in report,
         'gaps_logged': 'Gaps and limitations' in report and 'None logged' not in report.split('Section 8')[1][:800] if 'Section 8' in report else True,
-        'rtbl_warner': 'warner' in report.lower() or 'capital structure' in report.lower() or 'termination fee' in report.lower(),
+        'rtbl_warner': 'capital structure / M&A' in report or 'warner' in report.lower(),
         'analyst_proposal': 'Analyst Recommendations' in report or 'Recommended priorities' in report,
     }
 

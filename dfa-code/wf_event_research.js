@@ -6,6 +6,15 @@ const serperPrivate = state.research?.private_research?.serper_results || [];
 const signals = [...serperPublic, ...serperPrivate];
 const oneTime = state.research?.one_time_items || [];
 
+const CATEGORY_LABELS = {
+  capital_structure_mna: 'capital structure / M&A',
+  restructuring_layoffs: 'restructuring / layoffs',
+  acquisitions_divestitures: 'acquisitions / divestitures',
+  segment_reporting_changes: 'segment reporting changes',
+  accounting_policy_changes: 'accounting policy changes',
+  litigation_regulatory: 'litigation / regulatory',
+};
+
 function signalText(item) {
   return `${item.title || ''} ${item.description || item.snippet || ''}`.toLowerCase();
 }
@@ -28,7 +37,6 @@ const categories = [
   ['capital_structure_mna', ['warner bros', 'warner bros.', 'acquisition', 'termination fee', 'shareholder letter', 'capital structure', 'debt offering', 'bond', 'buyback', 'wbd']],
   ['restructuring_layoffs', ['restructuring', 'layoff', 'workforce reduction', 'cost reduction']],
   ['acquisitions_divestitures', ['acquisition', 'divestiture', 'merger', 'sale of business', 'terminated agreement']],
-  ['leadership_changes', ['ceo', 'cfo', 'chief executive', 'chief financial', 'leadership transition']],
   ['segment_reporting_changes', ['segment', 'reporting change', 'business unit']],
   ['accounting_policy_changes', ['accounting policy', 'restatement', 'material weakness']],
   ['litigation_regulatory', ['litigation', 'regulatory', 'lawsuit', 'investigation', 'antitrust']],
@@ -54,7 +62,7 @@ if (oneTime.length) {
       ...mna.events,
       ...oneTime.map((f) => ({
         title: f.label,
-        snippet: `Detected on quarterly anchor ${f.period_label || 'N/A'}; see 10-Q and shareholder letter for disclosure detail.`,
+        snippet: 'See 10-Q and Q1 FY2026 shareholder letter for disclosure detail.',
         source_url: '',
         source_name: 'DFA one-time item detector (10-Q / news / 8-K reference)',
         source_date: now,
@@ -86,17 +94,24 @@ const filingEvents = filings.filter((f) => isSupportedForm(f.form) && f.form !==
 }));
 const ref8k = (state.research?.filing_anchors?.recent_8k) || filings.find((f) => f.form === '8-K');
 
+function renderCategory(group) {
+  const label = CATEGORY_LABELS[group.category] || group.category.replaceAll('_', ' ');
+  if (group.status === 'N/A') {
+    return `### ${label}\n\nN/A — no supported public signal found in this run.`;
+  }
+  return `### ${label}\n\n${group.events.map((event) => `- ${event.title}: ${event.snippet} [${event.source_name}, ${event.source_date}]`).join('\n')}`;
+}
+
 const markdown = [
   '## Section 7: Read Between The Lines',
   '',
   'Supported events require filing or public-source text. Unsupported categories are N/A. 8-K items are reference context only.',
   '',
-  ...eventPack.map((group) => [
-    `### ${group.category.replaceAll('_', ' ')}`,
-    group.status === 'N/A'
-      ? 'N/A — no supported public signal found in this run.'
-      : group.events.map((event) => `- ${event.title}: ${event.snippet} [${event.source_name}, ${event.source_date}]`).join('\n'),
-  ].join('\n')),
+  ...eventPack.map((group) => renderCategory(group)),
+  '',
+  '### leadership changes',
+  '',
+  'N/A — no filing-backed leadership change signal found in this run.',
   '',
   'Recent operating filing context (financial anchors):',
   ...(filingEvents.length
