@@ -10,6 +10,7 @@ from pathlib import Path
 
 BASE = 'https://evoloai.app.n8n.cloud'
 API_KEY = os.environ.get('N8N_API_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3ZTk5ODA3OC0wMzY0LTQwNGUtOWMyYi0wOTVlYTM4ZWVlYzkiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiN2I1ZDU1YzItYjIyOC00ZDU1LWI1OGYtOTM4N2M2NmZhZTdiIiwiaWF0IjoxNzgyNDk3MjYwLCJleHAiOjE3ODUwMDYwMDB9.gjeQ99YWx09tvjW2onjx2UMv9w9RsrBRSIWToGeNqdc')
+DATA_TABLE_ID = 'IdoSLADBWpuuVRmk'
 ROOT = Path('/workspace')
 CODE = ROOT / 'dfa-code'
 WF_DIR = ROOT / 'dfa-workflows'
@@ -97,7 +98,132 @@ def code_node(node_id, name, pos, code):
     }
 
 
+def checkpoint_code(stage, label):
+    tpl = (CODE / 'wf_checkpoint.js').read_text()
+    return tpl.replace('__STAGE__', stage).replace('__LABEL__', label)
+
+
+def save_state_node(node_id, name, pos, light=False):
+    state_expr = (
+        '={{ JSON.stringify({ run_id: $json.run_id, created_at: $json.created_at, updated_at: $json.updated_at, status: $json.status, current_stage: $json.current_stage, progress: $json.progress, inputs: $json.inputs, entity: $json.entity, data_freshness: $json.data_freshness, research: { market_data: $json.research?.market_data || null }, qa: $json.qa || null, approval: $json.approval || null, audit_log: ($json.audit_log || []).slice(-12) }) }}'
+        if light else '={{ JSON.stringify($json) }}'
+    )
+    return {
+        'id': node_id,
+        'name': name,
+        'type': 'n8n-nodes-base.dataTable',
+        'typeVersion': 1.1,
+        'position': pos,
+        'parameters': {
+            'resource': 'row',
+            'operation': 'upsert',
+            'dataTableId': {'__rl': True, 'value': DATA_TABLE_ID, 'mode': 'id', 'cachedResultName': 'DFA_Run_State'},
+            'matchType': 'allConditions',
+            'filters': {'conditions': [{'keyName': 'run_id', 'condition': 'eq', 'keyValue': '={{ $json.run_id }}'}]},
+            'columns': {
+                'mappingMode': 'defineBelow',
+                'value': {
+                    'run_id': '={{ $json.run_id }}',
+                    'created_at': '={{ $json.created_at }}',
+                    'updated_at': '={{ $json.updated_at }}',
+                    'company_name': '={{ $json.inputs.company_name }}',
+                    'exec_type': '={{ $json.inputs.exec_type }}',
+                    'industry': '={{ $json.inputs.industry }}',
+                    'status': '={{ $json.status }}',
+                    'state_json': state_expr,
+                    'final_report_markdown': '={{ $json.final_report_markdown || ($json.gamma_deck && $json.gamma_deck.gamma_markdown) || "" }}',
+                    'google_doc_url': '',
+                    'pdf_url': '',
+                },
+                'matchingColumns': ['run_id'],
+                'schema': [],
+                'attemptToConvertTypes': False,
+                'convertFieldsToString': False,
+            },
+            'options': {},
+        },
+    }
+
+
+def cleanup_checkpoints(wf):
+    remove_names = {
+        n['name'] for n in wf['nodes']
+        if n['name'].startswith(('Checkpoint:', 'Save Checkpoint:', 'Continue After:'))
+    }
+    if not remove_names:
+        return
+    # Bridge bypass: Continue After:* nodes forward to their downstream targets.
+    bridges = {}
+    for src, conn in wf['connections'].items():
+        if not src.startswith('Continue After:'):
+            continue
+        downstream = [edge.get('node') for edge in conn.get('main', [[]])[0] if edge.get('node')]
+        if downstream:
+            bridges[src.replace('Continue After:', 'Checkpoint:')] = downstream[0]
+
+    wf['nodes'] = [n for n in wf['nodes'] if n['name'] not in remove_names]
+    new_connections = {}
+    for src, conn in wf['connections'].items():
+        if src in remove_names:
+            continue
+        mains = []
+        for branch in conn.get('main', []):
+            new_branch = []
+            for edge in branch:
+                target = edge.get('node')
+                if target in remove_names:
+                    if src.startswith('Checkpoint:') and src in bridges:
+                        new_branch.append({'node': bridges[src], 'type': 'main', 'index': 0})
+                    continue
+                if target not in remove_names:
+                    new_branch.append(edge)
+            if new_branch:
+                mains.append(new_branch)
+        if mains:
+            new_connections[src] = {'main': mains}
+    wf['connections'] = new_connections
+
+
+def insert_checkpoint_after(wf, after_name, stage, label):
+    cp_name = f'Checkpoint: {label}'
+    save_name = f'Save Checkpoint: {label}'
+    pass_name = f'Continue After: {label}'
+    if any(n['name'] == cp_name for n in wf['nodes']):
+        return
+    after = next(n for n in wf['nodes'] if n['name'] == after_name)
+    x, y = after['position']
+    uid = re.sub(r'[^a-z0-9]', '', stage)[:16]
+    cp = code_node(f'cp_{uid}', cp_name, [x + 140, y], checkpoint_code(stage, label))
+    save = save_state_node(f'cps_{uid}', save_name, [x + 280, y - 120], light=True)
+    passthrough = code_node(
+        f'cpp_{uid}',
+        pass_name,
+        [x + 280, y + 40],
+        f"return [{{ json: $('{cp_name}').first().json }}];",
+    )
+    wf['nodes'].extend([cp, save, passthrough])
+    downstream = wf['connections'].get(after_name, {}).get('main', [[]])[0]
+    wf['connections'][after_name] = {'main': [[{'node': cp_name, 'type': 'main', 'index': 0}]]}
+    wf['connections'][cp_name] = {'main': [[
+        {'node': save_name, 'type': 'main', 'index': 0},
+        {'node': pass_name, 'type': 'main', 'index': 0},
+    ]]}
+    wf['connections'][pass_name] = {'main': [downstream]}
+
+
 def patch_peer_benchmarks(wf):
+    patch_timeouts(wf, 600)
+    wf['nodes'] = [
+        {'id': 'trigger', 'name': 'Subworkflow Input', 'type': 'n8n-nodes-base.executeWorkflowTrigger', 'typeVersion': 1, 'position': [0, 0], 'parameters': {}},
+        code_node('peer_fetch', 'Fetch Peer SEC Benchmarks', [300, 0], bundle('wf_peer_benchmarks.js')),
+    ]
+    wf['connections'] = {'Subworkflow Input': {'main': [[{'node': 'Fetch Peer SEC Benchmarks', 'type': 'main', 'index': 0}]]}}
+
+
+def load_main_prod_base():
+    import subprocess
+    raw = subprocess.check_output(['git', 'show', '2cd73fd:dfa-workflows/Qc2t6hELYvHMtuox.json'])
+    return json.loads(raw)
     patch_timeouts(wf, 600)
     wf['nodes'] = [
         {'id': 'trigger', 'name': 'Subworkflow Input', 'type': 'n8n-nodes-base.executeWorkflowTrigger', 'typeVersion': 1, 'position': [0, 0], 'parameters': {}},
@@ -253,16 +379,120 @@ return [{ json: state }];"""
         })
     wf['connections']['Value Realization Agent'] = {'main': [[{'node': 'Approval Agent', 'type': 'main', 'index': 0}]]}
     wf['connections']['Approval Agent'] = {'main': [[{'node': 'Assembly QA Agent', 'type': 'main', 'index': 0}]]}
-    if 'Assembly QA Agent' in wf['connections'].get('Value Realization Agent', {}).get('main', [[]])[0]:
-        pass
 
     patch_timeouts(wf, 1800)
 
-    finalize = next(n for n in wf['nodes'] if n['name'] == 'Finalize Production Result')
-    finalize['parameters']['jsCode'] = finalize['parameters']['jsCode'].replace(
-        "gamma_markdown: state.gamma_deck?.gamma_markdown || ''",
-        "gamma_markdown: state.gamma_deck?.gamma_markdown || '',\n  final_report_markdown: state.final_report_markdown || ''"
-    )
+    finalize_code = """const state = items[0]?.json?.state || items[0]?.json || {};
+const now = new Date().toISOString();
+state.updated_at = now;
+state.status = state.gamma_deck?.gamma_markdown ? 'completed' : 'completed_with_warnings';
+state.current_stage = 'ready';
+state.portal_result = {
+  run_id: state.run_id,
+  status: state.status,
+  company: state.entity,
+  deck_status: state.gamma_deck?.status || 'missing',
+  gamma_markdown: state.gamma_deck?.gamma_markdown || '',
+  final_report_markdown: state.final_report_markdown || '',
+  data_freshness: state.data_freshness || {},
+  market_data: state.research?.market_data || {},
+  slides_json: state.gamma_deck?.slides_json || [],
+  missing_data_notes: state.gamma_deck?.missing_data_notes || [],
+  suggested_gamma_theme: state.gamma_deck?.suggested_gamma_theme || 'Clean executive finance theme',
+  source_coverage: state.normalized?.source_coverage || {},
+  qa: state.qa || {},
+  delivery: state.delivery || {},
+  approval: state.approval || {},
+};
+state.audit_log = state.audit_log || [];
+state.audit_log.push({ timestamp: now, workflow_name: 'WF_MAIN_PROD', status: state.status === 'completed' ? 'OK' : 'WARN', message: 'Production run finalized for portal delivery.' });
+return [{ json: state }];"""
+    set_node_code(wf, 'Finalize Production Result', finalize_code)
+
+    for n in wf['nodes']:
+        if n['name'] == 'Save Final Run State':
+            n['parameters']['columns']['value']['final_report_markdown'] = '={{ $json.final_report_markdown || ($json.gamma_deck && $json.gamma_deck.gamma_markdown) || "" }}'
+
+    if 'Save Running State' not in names:
+        init_node = next(n for n in wf['nodes'] if n['name'] == 'Initialize Production State')
+        x, y = init_node['position']
+        mark_running = code_node('mark_running', 'Mark Running State', [x + 120, y], """const state = items[0]?.json || {};
+state.status = 'running';
+state.current_stage = 'initialized';
+state.updated_at = new Date().toISOString();
+return [{ json: state }];""")
+        save_running = save_state_node('save_running', 'Save Running State', [x + 240, y - 80], light=True)
+        continue_node = code_node('continue_running', 'Continue Pipeline', [x + 240, y + 40], "return [{ json: $('Mark Running State').first().json }];")
+        wf['nodes'].extend([mark_running, save_running, continue_node])
+        downstream = wf['connections']['Initialize Production State']['main'][0]
+        wf['connections']['Initialize Production State'] = {'main': [[{'node': 'Mark Running State', 'type': 'main', 'index': 0}]]}
+        wf['connections']['Mark Running State'] = {'main': [[
+            {'node': 'Save Running State', 'type': 'main', 'index': 0},
+            {'node': 'Continue Pipeline', 'type': 'main', 'index': 0},
+        ]]}
+        wf['connections']['Continue Pipeline'] = {'main': [downstream]}
+
+
+def patch_status_api(wf):
+    status_code = """const row = items[0]?.json || null;
+let state = null;
+try { state = row?.state_json ? JSON.parse(row.state_json) : null; } catch (e) {}
+const freshness = state?.data_freshness || {};
+const progress = state?.progress || {};
+return [{ json: {
+  success: Boolean(row?.run_id),
+  run_id: row?.run_id || null,
+  status: row?.status || 'not_found',
+  company_name: row?.company_name || state?.inputs?.company_name || null,
+  current_stage: state?.current_stage || (row?.status === 'completed' ? 'ready' : 'unknown'),
+  progress_pct: progress.pct || (row?.status === 'completed' ? 100 : (row?.status === 'running' ? 15 : 0)),
+  progress_label: progress.label || state?.current_stage || null,
+  data_freshness: freshness,
+  market_data: state?.research?.market_data || null,
+  deck_status: state?.gamma_deck?.status || null,
+  qa_status: state?.qa?.validation_status || null,
+  updated_at: row?.updated_at || state?.updated_at || null,
+  audit_log: (state?.audit_log || []).slice(-8),
+  message: row?.run_id
+    ? (row.status === 'completed' || row.status === 'completed_with_warnings'
+      ? 'Run completed. Fetch result endpoint for full report.'
+      : `Run is ${row.status || 'running'} at stage ${state?.current_stage || 'unknown'}.`)
+    : 'No run found for the supplied run_id.',
+} }];"""
+    set_node_code(wf, 'Build Status Response', status_code)
+
+
+def patch_result_api(wf):
+    result_code = """const row = items[0]?.json || null;
+let state = null;
+try { state = row?.state_json ? JSON.parse(row.state_json) : null; } catch (e) {}
+const deck = state?.gamma_deck || {};
+const freshness = state?.data_freshness || {};
+const market = state?.research?.market_data || {};
+return [{ json: {
+  success: Boolean(row?.run_id),
+  run_id: row?.run_id || null,
+  status: row?.status || 'not_found',
+  company: state?.entity || null,
+  final_report_markdown: state?.final_report_markdown || row?.final_report_markdown || '',
+  gamma_markdown: deck.gamma_markdown || '',
+  slides_json: deck.slides_json || [],
+  missing_data_notes: deck.missing_data_notes || [],
+  suggested_gamma_theme: deck.suggested_gamma_theme || 'Clean executive finance theme',
+  data_freshness: freshness,
+  market_data: market,
+  source_coverage: state?.normalized?.source_coverage || {},
+  qa: state?.qa || {},
+  delivery: state?.delivery || {},
+  approval: state?.approval || {},
+  audit_log: (state?.audit_log || []).slice(-12),
+  message: row?.run_id ? 'Result found.' : 'No result found for the supplied run_id.',
+} }];"""
+    set_node_code(wf, 'Build Result Response', result_code)
+
+
+def patch_portal(wf):
+    set_node_code(wf, 'Render Portal HTML', (CODE / 'portal_render.js').read_text())
 
 
 def patch_api_start(wf):
@@ -270,7 +500,6 @@ def patch_api_start(wf):
 const body = input.body || input;
 const now = new Date().toISOString();
 const clean = (v) => String(v || '').trim();
-const step = clean(body.conversation_step || body.step || 'auto');
 const companyName = clean(body.company_name || body.companyName || body.company);
 const ticker = clean(body.ticker || body.symbol);
 const execType = clean(body.exec_type || body.executive);
@@ -342,12 +571,18 @@ def main():
         ('uCs3FRw2T3nplPIE', patch_financial_snapshot),
         ('RLp9AMthAvTC0iBC', patch_analyze),
         ('0purjOnIMYZOauYb', patch_api_start),
+        ('n7RG6ijbdmdOrGll', patch_status_api),
+        ('YyNOFcGZntWanYNn', patch_result_api),
+        ('A8xUUjaD7DMUk1sn', patch_portal),
         ('Qc2t6hELYvHMtuox', patch_main_prod),
     ]
     results = []
     for wid, fn in patches_order:
         path = WF_DIR / f'{wid}.json'
-        wf = json.loads(path.read_text())
+        if wid == 'Qc2t6hELYvHMtuox':
+            wf = load_main_prod_base()
+        else:
+            wf = json.loads(path.read_text())
         fn(wf)
         path.write_text(json.dumps(wf, indent=2))
         resp = put_workflow(wf)

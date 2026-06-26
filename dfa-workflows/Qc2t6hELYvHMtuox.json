@@ -314,7 +314,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "javaScript",
-        "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nstate.updated_at = now;\nstate.status = state.gamma_deck?.gamma_markdown ? 'completed' : 'completed_with_warnings';\nstate.current_stage = 'ready';\nstate.portal_result = {\n  run_id: state.run_id,\n  status: state.status,\n  company: state.entity,\n  deck_status: state.gamma_deck?.status || 'missing',\n  gamma_markdown: state.gamma_deck?.gamma_markdown || '',\n  final_report_markdown: state.final_report_markdown || '',\n  final_report_markdown: state.final_report_markdown || '',\n  final_report_markdown: state.final_report_markdown || '',\n  slides_json: state.gamma_deck?.slides_json || [],\n  missing_data_notes: state.gamma_deck?.missing_data_notes || [],\n  suggested_gamma_theme: state.gamma_deck?.suggested_gamma_theme || 'Clean executive finance theme',\n  source_coverage: state.normalized?.source_coverage || {},\n  qa: state.qa || {},\n  delivery: state.delivery || {}\n};\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_MAIN_PROD', status: state.status === 'completed' ? 'OK' : 'WARN', message: 'Production run finalized for portal delivery.' });\nreturn [{ json: state }];"
+        "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nstate.updated_at = now;\nstate.status = state.gamma_deck?.gamma_markdown ? 'completed' : 'completed_with_warnings';\nstate.current_stage = 'ready';\nstate.portal_result = {\n  run_id: state.run_id,\n  status: state.status,\n  company: state.entity,\n  deck_status: state.gamma_deck?.status || 'missing',\n  gamma_markdown: state.gamma_deck?.gamma_markdown || '',\n  final_report_markdown: state.final_report_markdown || '',\n  data_freshness: state.data_freshness || {},\n  market_data: state.research?.market_data || {},\n  slides_json: state.gamma_deck?.slides_json || [],\n  missing_data_notes: state.gamma_deck?.missing_data_notes || [],\n  suggested_gamma_theme: state.gamma_deck?.suggested_gamma_theme || 'Clean executive finance theme',\n  source_coverage: state.normalized?.source_coverage || {},\n  qa: state.qa || {},\n  delivery: state.delivery || {},\n  approval: state.approval || {},\n};\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_MAIN_PROD', status: state.status === 'completed' ? 'OK' : 'WARN', message: 'Production run finalized for portal delivery.' });\nreturn [{ json: state }];"
       }
     },
     {
@@ -356,7 +356,7 @@
             "industry": "={{ $json.inputs.industry }}",
             "status": "={{ $json.status }}",
             "state_json": "={{ JSON.stringify($json) }}",
-            "final_report_markdown": "={{ ($json.gamma_deck && $json.gamma_deck.gamma_markdown) ? $json.gamma_deck.gamma_markdown : ($json.final_report_markdown || '') }}",
+            "final_report_markdown": "={{ $json.final_report_markdown || ($json.gamma_deck && $json.gamma_deck.gamma_markdown) || \"\" }}",
             "google_doc_url": "",
             "pdf_url": ""
           },
@@ -545,6 +545,89 @@
         },
         "mode": "each"
       }
+    },
+    {
+      "id": "mark_running",
+      "name": "Mark Running State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        380,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const state = items[0]?.json || {};\nstate.status = 'running';\nstate.current_stage = 'initialized';\nstate.updated_at = new Date().toISOString();\nreturn [{ json: state }];"
+      }
+    },
+    {
+      "id": "save_running",
+      "name": "Save Running State",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        500,
+        -80
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "IdoSLADBWpuuVRmk",
+          "mode": "id",
+          "cachedResultName": "DFA_Run_State"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "run_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.run_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "run_id": "={{ $json.run_id }}",
+            "created_at": "={{ $json.created_at }}",
+            "updated_at": "={{ $json.updated_at }}",
+            "company_name": "={{ $json.inputs.company_name }}",
+            "exec_type": "={{ $json.inputs.exec_type }}",
+            "industry": "={{ $json.inputs.industry }}",
+            "status": "={{ $json.status }}",
+            "state_json": "={{ JSON.stringify({ run_id: $json.run_id, created_at: $json.created_at, updated_at: $json.updated_at, status: $json.status, current_stage: $json.current_stage, progress: $json.progress, inputs: $json.inputs, entity: $json.entity, data_freshness: $json.data_freshness, research: { market_data: $json.research?.market_data || null }, qa: $json.qa || null, approval: $json.approval || null, audit_log: ($json.audit_log || []).slice(-12) }) }}",
+            "final_report_markdown": "={{ $json.final_report_markdown || ($json.gamma_deck && $json.gamma_deck.gamma_markdown) || \"\" }}",
+            "google_doc_url": "",
+            "pdf_url": ""
+          },
+          "matchingColumns": [
+            "run_id"
+          ],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "continue_running",
+      "name": "Continue Pipeline",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        40
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "return [{ json: $('Mark Running State').first().json }];"
+      }
     }
   ],
   "connections": {
@@ -563,7 +646,7 @@
       "main": [
         [
           {
-            "node": "Entity Agent",
+            "node": "Mark Running State",
             "type": "main",
             "index": 0
           }
@@ -769,6 +852,33 @@
         [
           {
             "node": "Assembly QA Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Running State": {
+      "main": [
+        [
+          {
+            "node": "Save Running State",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Continue Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Pipeline": {
+      "main": [
+        [
+          {
+            "node": "Entity Agent",
             "type": "main",
             "index": 0
           }
