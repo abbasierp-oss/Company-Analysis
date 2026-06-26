@@ -1,0 +1,170 @@
+{
+  "updatedAt": "2026-06-26T17:12:27.099Z",
+  "createdAt": "2026-06-24T10:34:09.611Z",
+  "id": "Hep7G1mvINz1NdqG",
+  "name": "DFA - WF_ASSEMBLE_QA",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Subworkflow Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "logic",
+      "name": "Assemble And QA Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Shared DFA financial utilities (inlined into n8n Code nodes)\nconst SEC_UA = 'DamodaranAnalystSystem/2.0 contact@goevolo.com';\n\nfunction normName(v) {\n  return String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');\n}\n\nfunction tagRows(facts, tags) {\n  for (const tag of tags) {\n    const fact = facts[tag];\n    if (!fact?.units) continue;\n    const rows = Object.values(fact.units).flat().filter((r) => r && r.val !== undefined);\n    if (rows.length) return { tag, rows };\n  }\n  return { tag: tags[0], rows: [] };\n}\n\nfunction latestAnnualRow(rows, fy) {\n  return rows\n    .filter((r) => r.form === '10-K' && Number(r.fy) === Number(fy))\n    .sort((a, b) => String(a.end || '').localeCompare(String(b.end || '')) || String(a.filed || '').localeCompare(String(b.filed || '')))\n    .at(-1) || null;\n}\n\nfunction latestQuarterRows(rows) {\n  const qrows = rows.filter((r) => r.form === '10-Q' && r.fy && r.fp)\n    .sort((a, b) => String(a.end || '').localeCompare(String(b.end || '')) || String(a.filed || '').localeCompare(String(b.filed || '')));\n  const uniq = [];\n  for (const row of qrows) {\n    const key = `${row.fy}-${row.fp}`;\n    if (!uniq.some((p) => p.key === key)) uniq.push({ key, fy: row.fy, fp: row.fp, end: row.end, filed: row.filed });\n  }\n  return uniq;\n}\n\nfunction compactFacts(usGaapAll) {\n  const supported = [\n    'RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet',\n    'GrossProfit', 'OperatingIncomeLoss', 'NetIncomeLoss', 'ProfitLoss',\n    'NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations',\n    'PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets',\n    'LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent', 'LongTermDebtAndFinanceLeaseObligationsCurrent',\n    'AssetsCurrent', 'LiabilitiesCurrent', 'InterestExpenseNonOperating', 'InterestExpense',\n    'EarningsPerShareDiluted', 'DepreciationDepletionAndAmortization', 'DepreciationDepletionAndAmortizationExpense', 'DepreciationAndAmortization',\n    'StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest',\n    'Assets', 'Liabilities', 'CashAndCashEquivalentsAtCarryingValue', 'ShortTermBorrowings'\n  ];\n  const out = {};\n  for (const tag of supported) {\n    const fact = usGaapAll[tag];\n    if (!fact?.units) continue;\n    const units = {};\n    for (const [unitName, rows] of Object.entries(fact.units)) {\n      if (!Array.isArray(rows)) continue;\n      const compact = rows\n        .filter((r) => r && r.val !== undefined && ['10-K', '10-Q'].includes(r.form))\n        .sort((a, b) => String(a.filed || '').localeCompare(String(b.filed || '')) || String(a.end || '').localeCompare(String(b.end || '')))\n        .slice(-20)\n        .map((r) => ({ end: r.end, val: r.val, fy: r.fy, fp: r.fp, form: r.form, filed: r.filed, frame: r.frame }));\n      if (compact.length) units[unitName] = compact;\n    }\n    if (Object.keys(units).length) out[tag] = { label: fact.label, units };\n  }\n  return out;\n}\n\nfunction resolveCikFromDirectory(directory, companyName, ticker) {\n  const rows = Array.isArray(directory) ? directory : Object.values(directory || {});\n  const nameNorm = normName(companyName);\n  const tickerNorm = normName(ticker);\n  function score(row) {\n    const title = row.title || row.name || '';\n    const rowTicker = row.ticker || '';\n    const titleNorm = normName(title);\n    const rowTickerNorm = normName(rowTicker);\n    let points = 0;\n    if (tickerNorm && rowTickerNorm === tickerNorm) points += 120;\n    if (titleNorm === nameNorm) points += 100;\n    if (nameNorm && titleNorm.startsWith(nameNorm)) points += 70;\n    if (nameNorm && titleNorm.includes(nameNorm)) points += 45;\n    return points;\n  }\n  const ranked = rows\n    .filter((row) => row && (row.title || row.name) && (row.cik_str || row.cik))\n    .map((row) => ({ row, score: score(row) }))\n    .filter((e) => e.score > 0)\n    .sort((a, b) => b.score - a.score);\n  const best = ranked[0]?.row || null;\n  const rawCik = best?.cik_str || best?.cik || null;\n  const cik = rawCik ? String(rawCik).padStart(10, '0') : null;\n  return { best, cik, ranked };\n}\n\nfunction metricFromFacts(facts, metric, fy) {\n  const map = {\n    revenue: ['RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet'],\n    gross_profit: ['GrossProfit'],\n    operating_income: ['OperatingIncomeLoss'],\n    net_income: ['NetIncomeLoss', 'ProfitLoss'],\n    operating_cash_flow: ['NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations'],\n    capex: ['PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets'],\n    long_term_debt: ['LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent'],\n    current_assets: ['AssetsCurrent'],\n    current_liabilities: ['LiabilitiesCurrent'],\n    interest_expense: ['InterestExpenseNonOperating', 'InterestExpense'],\n    equity: ['StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest'],\n    assets: ['Assets'],\n    cash: ['CashAndCashEquivalentsAtCarryingValue'],\n    depreciation: ['DepreciationDepletionAndAmortization', 'DepreciationDepletionAndAmortizationExpense', 'DepreciationAndAmortization']\n  };\n  const found = tagRows(facts, map[metric] || [metric]);\n  const row = latestAnnualRow(found.rows, fy);\n  return row ? Number(row.val) : null;\n}\n\nfunction computeEntityMetrics(facts, sourceMeta) {\n  const years = [2025, 2024, 2023];\n  const latestFy = years.find((fy) => metricFromFacts(facts, 'revenue', fy) !== null) || years[1];\n  const revenue = metricFromFacts(facts, 'revenue', latestFy);\n  const gross = metricFromFacts(facts, 'gross_profit', latestFy);\n  const op = metricFromFacts(facts, 'operating_income', latestFy);\n  const net = metricFromFacts(facts, 'net_income', latestFy);\n  const ocf = metricFromFacts(facts, 'operating_cash_flow', latestFy);\n  const capex = metricFromFacts(facts, 'capex', latestFy);\n  const ca = metricFromFacts(facts, 'current_assets', latestFy);\n  const cl = metricFromFacts(facts, 'current_liabilities', latestFy);\n  const interest = metricFromFacts(facts, 'interest_expense', latestFy);\n  const debt = metricFromFacts(facts, 'long_term_debt', latestFy);\n  const equity = metricFromFacts(facts, 'equity', latestFy);\n  const assets = metricFromFacts(facts, 'assets', latestFy);\n  const cash = metricFromFacts(facts, 'cash', latestFy);\n  const dep = metricFromFacts(facts, 'depreciation', latestFy);\n  const revY1 = metricFromFacts(facts, 'revenue', latestFy - 1);\n  const revY3 = metricFromFacts(facts, 'revenue', latestFy - 3);\n  const fcf = ocf !== null && capex !== null ? ocf - capex : null;\n  const ebitda = op !== null && dep !== null ? op + dep : null;\n  const safeDiv = (a, b) => (a !== null && b !== null && b !== 0 ? a / b : null);\n  return {\n    period: `FY${latestFy}`,\n    revenue,\n    gross_margin: safeDiv(gross, revenue),\n    operating_margin: safeDiv(op, revenue),\n    net_margin: safeDiv(net, revenue),\n    ebitda_margin: safeDiv(ebitda, revenue),\n    fcf_margin: safeDiv(fcf, revenue),\n    current_ratio: safeDiv(ca, cl),\n    debt_to_equity: safeDiv(debt, equity),\n    interest_coverage: safeDiv(op, interest),\n    roce: safeDiv(op, assets && cl !== null ? assets - cl : null),\n    asset_turnover: safeDiv(revenue, assets),\n    yoy_revenue_growth: safeDiv(revenue && revY1 ? revenue - revY1 : null, revY1),\n    revenue_cagr_3y: revY3 && revenue && revY3 > 0 ? Math.pow(revenue / revY3, 1 / 3) - 1 : null,\n    net_debt_ebitda: ebitda && debt !== null && cash !== null && ebitda !== 0 ? (debt - cash) / ebitda : null,\n    source_meta: sourceMeta\n  };\n}\n\nfunction fmtMetric(v, asPct = false) {\n  if (v === null || v === undefined || Number.isNaN(v)) return 'N/A';\n  if (asPct) return `${(v * 100).toFixed(1)}%`;\n  if (Math.abs(v) >= 1e9) return `${(v / 1e9).toFixed(2)}B USD`;\n  if (Math.abs(v) >= 1e6) return `${(v / 1e6).toFixed(1)}M USD`;\n  return `${Number(v).toLocaleString('en-US')} USD`;\n}\n\nfunction peerDefaults(industry) {\n  const key = String(industry || '').toLowerCase();\n  const defaults = {\n    technology: ['Microsoft', 'Alphabet', 'Meta Platforms', 'Amazon', 'NVIDIA'],\n    saas: ['Salesforce', 'Adobe', 'ServiceNow', 'Atlassian', 'Workday'],\n    retail: ['Walmart', 'Costco', 'Target', 'Amazon', 'Home Depot'],\n    banking: ['JPMorgan Chase', 'Bank of America', 'Wells Fargo', 'Citigroup', 'Goldman Sachs'],\n    healthcare: ['UnitedHealth Group', 'HCA Healthcare', 'Elevance Health', 'CVS Health', 'Humana'],\n    manufacturing: ['General Electric', 'Honeywell', 'Caterpillar', '3M', 'Siemens'],\n    gaming: ['Electronic Arts', 'Take-Two Interactive', 'Roblox', 'Nintendo', 'Sony'],\n    media: ['Disney', 'Netflix', 'Comcast', 'Warner Bros. Discovery', 'Paramount Global']\n  };\n  const match = Object.keys(defaults).find((k) => key.includes(k)) || 'technology';\n  return defaults[match];\n}\n\nfunction parsePeerList(raw) {\n  if (!raw) return [];\n  if (Array.isArray(raw)) return raw;\n  return String(raw).split(/[,;\\n|]/).map((s) => s.trim()).filter(Boolean);\n}\n\nfunction claudeBaseSystem(inputs, expert) {\n  return `You are an AI financial analyst who thinks like Aswath Damodaran. Evidence first. Every figure must come from the provided JSON only. Never fabricate numbers. If data is missing, write N/A and explain why. Show formulas for computed metrics. Do not use templating placeholders or curly-brace variables. Industry lens: ${expert?.name || inputs.expert_pref || 'industry expert'}. Executive audience: ${inputs.exec_type || 'executive'}. Service provider: ${inputs.service_provider || 'MY COMPANY'}.`;\n}\n\nfunction parseClaudeJson(response) {\n  const content = response?.content || [];\n  const text = content.map((p) => p.text || '').join('\\n').trim() || JSON.stringify(response);\n  try { return JSON.parse(text); } catch (e) {}\n  const match = text.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { return JSON.parse(match[0]); } catch (e) {} }\n  return { _raw: text };\n}\n\nconst state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nstate.sections = state.sections || {};\nconst sectionOrder = ['s1_source_pack','s2_snapshot','s3_benchmarks','s4_insights','s5_ratios','s6_proposal','s7_rtbl','s8_assumptions','s9_sales'];\nconst freshness = state.data_freshness || {};\nconst market = state.research?.market_data || {};\nstate.sections.s1_source_pack = state.sections.s1_source_pack || [\n  '## Section 1: Company & Source Pack',\n  '',\n  `Legal name: ${state.entity?.legal_name || 'N/A'}`,\n  `Ticker/CIK: ${state.entity?.ticker || 'N/A'} / ${state.entity?.cik || 'N/A'}`,\n  `Exchange: ${state.entity?.exchange || 'N/A'}`,\n  `Fiscal year-end: ${state.entity?.fiscal_year_end || 'N/A'}`,\n  `Reporting currency: ${state.entity?.reporting_currency || 'USD'}`,\n  `Market cap: ${market.market_cap_usd ? fmtMetric(market.market_cap_usd) : 'N/A'} (${market.source_date || 'N/A'})`,\n  `Market cap source: ${market.source_name || 'N/A'}`,\n  `Reliability: ${state.entity?.confidence || 'LOW'}`,\n  `Latest filing: ${freshness.latest_filing_form || 'N/A'} filed ${freshness.latest_filing_date || 'N/A'}`,\n  `Data fetched at: ${freshness.fetched_at || now}`,\n  '',\n  `Sources: ${(state.entity?.sources || []).map((s) => `${s.source_name} (${s.source_date})`).join(', ') || 'N/A'}`,\n].join('\\n');\nfunction latestMetric(name) {\n  const series = state.normalized?.metrics?.[name] || [];\n  const item = Array.isArray(series) ? series[series.length - 1] : null;\n  if (!item) return 'N/A';\n  const cite = item.source_name ? ` \u2014 ${item.source_name}` : '';\n  return `${item.value} ${item.unit || ''} (${item.period || 'latest'})${cite}`;\n}\nif (!state.sections.s2_snapshot && state.financial_snapshot?.markdown) {\n  state.sections.s2_snapshot = state.financial_snapshot.markdown;\n}\nstate.sections.s2_snapshot = state.sections.s2_snapshot || `## Section 2: Financial Snapshot\\n\\nSee financial_snapshot table in state. Revenue: ${latestMetric('revenue')}`;\nstate.sections.s8_assumptions = state.sections.s8_assumptions || [\n  '## Section 8: Assumptions, Data Gaps & Reliability Notes',\n  '',\n  `Data freshness: ${freshness.rule || 'Live SEC fetch at execution time.'}`,\n  `Fetched at: ${freshness.fetched_at || now}`,\n  `Latest SEC filing used: ${freshness.latest_filing_form || 'N/A'} (${freshness.latest_filing_date || 'N/A'})`,\n  '',\n  `Reliability map: ${JSON.stringify(state.normalized?.reliability_map || {})}`,\n  '',\n  'Gaps:',\n  (state.normalized?.gaps || []).map((g) => `- ${g.metric}: ${g.reason}`).join('\\n') || '- None logged.',\n  '',\n  `Formulas: ${JSON.stringify(state.normalized?.formulas || {})}`,\n].join('\\n');\nconst missing = sectionOrder.filter((id) => !state.sections[id]);\nconst finalMarkdown = [\n  '# Damodaran-Style Analyst Report',\n  `Run ID: ${state.run_id || 'N/A'}`,\n  `Generated at: ${now}`,\n  `Financial data as-of: ${freshness.fetched_at || now}`,\n  '',\n].concat(sectionOrder.map((id) => state.sections[id] || `## ${id}\\n\\nN/A - section not generated.`)).join('\\n\\n---\\n\\n');\nstate.final_report_markdown = finalMarkdown;\nstate.report_outputs = {\n  full_report_markdown: finalMarkdown,\n  gamma_deck_markdown: state.gamma_deck?.gamma_markdown || '',\n  dual_output: true,\n};\nconst citationQa = {\n  figure_source_policy: 'Every figure must cite SEC EDGAR, market data source, or explicit N/A gap.',\n  financial_snapshot_ready: Boolean(state.financial_snapshot?.rows?.length || state.sections.s2_snapshot),\n  ratio_dashboard_ready: Boolean(state.ratio_dashboard?.annual?.length || state.sections.s5_ratios),\n  peer_benchmark_ready: Boolean(state.peer_benchmarks?.peers?.some((p) => p.source_status === 'SEC_PEER_FACTS_OK')),\n  value_realization_ready: Boolean(state.sections.s9_sales),\n  proposal_ready: Boolean(state.sections.s6_proposal),\n  data_freshness_recorded: Boolean(freshness.fetched_at),\n  gap_count: state.normalized?.source_coverage?.gap_count || (state.normalized?.gaps || []).length,\n  warning_notes: [],\n};\nif (!citationQa.peer_benchmark_ready) citationQa.warning_notes.push('No SEC-backed peer metrics in this run.');\nif (!citationQa.data_freshness_recorded) citationQa.warning_notes.push('Data freshness stamp missing.');\nconst qaWarnings = [...missing.map((id) => `Missing section: ${id}`), ...citationQa.warning_notes];\nstate.qa = {\n  missing_sections: missing,\n  validation_status: qaWarnings.length ? 'WARN' : 'PASS',\n  checks: ['all_sections_present','data_freshness','citation_policy','dual_output_ready'],\n  citation_qa: citationQa,\n  warning: qaWarnings.join(' | '),\n};\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_ASSEMBLE_QA', status: state.qa.validation_status, message: state.qa.warning || 'Full report and dual outputs assembled.' });\nreturn [{ json: state }];\n"
+      }
+    }
+  ],
+  "connections": {
+    "Subworkflow Input": {
+      "main": [
+        [
+          {
+            "node": "Assemble And QA Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Karachi",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "executionTimeout": 300,
+    "saveExecutionProgress": false
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "02d7bae6-9867-409d-8eaf-ec44b7ecd0e3",
+  "activeVersionId": "02d7bae6-9867-409d-8eaf-ec44b7ecd0e3",
+  "versionCounter": 4,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-24T10:34:09.613Z",
+      "createdAt": "2026-06-24T10:34:09.613Z",
+      "role": "workflow:owner",
+      "workflowId": "Hep7G1mvINz1NdqG",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-06-24T11:25:52.602Z",
+      "createdAt": "2026-06-24T11:25:52.602Z",
+      "id": "PvqNmKlzG0X72TtP",
+      "name": "DFA Analyst System"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-06-26T17:12:27.100Z",
+    "createdAt": "2026-06-26T17:12:27.100Z",
+    "versionId": "02d7bae6-9867-409d-8eaf-ec44b7ecd0e3",
+    "workflowId": "Hep7G1mvINz1NdqG",
+    "nodes": [
+      {
+        "id": "trigger",
+        "name": "Subworkflow Input",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "inputSource": "passthrough"
+        }
+      },
+      {
+        "id": "logic",
+        "name": "Assemble And QA Report",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          260,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nstate.sections = state.sections || {};\nconst sectionOrder = ['s1_source_pack','s2_snapshot','s3_benchmarks','s4_insights','s5_ratios','s6_proposal','s7_rtbl','s8_assumptions','s9_sales'];\nstate.sections.s1_source_pack = state.sections.s1_source_pack || `## Section 1: Company & Source Pack\\n\\nLegal name: ${state.entity?.legal_name || 'N/A'}\\n\\nTicker/CIK: ${state.entity?.ticker || 'N/A'} / ${state.entity?.cik || 'N/A'}\\n\\nReliability: ${state.entity?.confidence || 'LOW'}\\n\\nSources: ${(state.entity?.sources || []).map(s => `${s.source_name} (${s.source_date})`).join(', ') || 'N/A'}`;\nfunction latestMetric(name) {\n  const series = state.normalized?.metrics?.[name] || [];\n  const item = Array.isArray(series) ? series[series.length - 1] : null;\n  if (!item) return 'N/A';\n  return `${item.value} ${item.unit || ''} (${item.period || 'latest'}) - ${item.source_name || 'source unavailable'}`;\n}\nstate.sections.s2_snapshot = state.sections.s2_snapshot || `## Section 2: Financial Snapshot\\n\\nRevenue: ${latestMetric('revenue')}\\n\\nGross profit: ${latestMetric('gross_profit')}\\n\\nOperating income: ${latestMetric('operating_income')}\\n\\nNet income: ${latestMetric('net_income')}\\n\\nOperating cash flow: ${latestMetric('operating_cash_flow')}\\n\\nFree cash flow: ${latestMetric('free_cash_flow')}\\n\\nGross margin: ${latestMetric('gross_margin')}\\n\\nOperating margin: ${latestMetric('operating_margin')}\\n\\nCurrent ratio: ${latestMetric('current_ratio')}`;\nstate.sections.s8_assumptions = state.sections.s8_assumptions || `## Section 8: Assumptions, Data Gaps & Reliability Notes\\n\\nReliability map: ${JSON.stringify(state.normalized?.reliability_map || {})}\\n\\nGaps:\\n${(state.normalized?.gaps || []).map(g => `- ${g.metric}: ${g.reason}`).join('\\n') || '- None logged.'}\\n\\nFormulas: ${JSON.stringify(state.normalized?.formulas || {})}`;\nconst missing = sectionOrder.filter((id) => !state.sections[id]);\nconst finalMarkdown = [`# Damodaran-Style Analyst Report`, `Run ID: ${state.run_id || 'N/A'}`, `Generated at: ${now}`, ''].concat(sectionOrder.map((id) => state.sections[id] || `## ${id}\\n\\nN/A - section not generated.`)).join('\\n\\n---\\n\\n');\nstate.final_report_markdown = finalMarkdown;\nconst citationQa = {\n  figure_source_policy: 'Every extracted/computed figure must originate from normalized metrics, financial_snapshot, ratio_dashboard, peer_benchmarks, or explicit N/A gap notes.',\n  financial_snapshot_ready: Boolean(state.financial_snapshot?.rows?.length),\n  ratio_dashboard_ready: Boolean(state.ratio_dashboard?.annual?.length),\n  peer_benchmark_ready: Boolean(state.peer_benchmarks?.peers?.length),\n  value_realization_ready: Boolean(state.value_realization?.insight_to_value_map?.length),\n  proposal_ready: Boolean(state.executive_proposal?.initiatives?.length),\n  gap_count: state.normalized?.source_coverage?.gap_count || 0,\n  warning_notes: []\n};\nif (!citationQa.financial_snapshot_ready) citationQa.warning_notes.push('Exact financial snapshot table missing.');\nif (!citationQa.ratio_dashboard_ready) citationQa.warning_notes.push('Ratio dashboard missing.');\nif (state.peer_benchmarks?.peers?.some((peer) => peer.source_status === 'PENDING_PEER_SEC_FACTS')) citationQa.warning_notes.push('Peer rows selected but peer metrics include N/A because peer SEC fact fetching is not fully available in this run.');\nif (!citationQa.value_realization_ready) citationQa.warning_notes.push('Section 9 value realization missing.');\nif (!citationQa.proposal_ready) citationQa.warning_notes.push('Section 6 executive proposal missing.');\nconst qaWarnings = [...missing.map((id) => `Missing section: ${id}`), ...citationQa.warning_notes];\nstate.qa = {\n  missing_sections: missing,\n  validation_status: qaWarnings.length ? 'WARN' : 'PASS',\n  checks: ['all_sections_present','gaps_rendered','source_pack_present','assumptions_present','financial_snapshot_present','ratio_dashboard_present','proposal_present','value_realization_present','citation_policy_recorded'],\n  citation_qa: citationQa,\n  warning: qaWarnings.join(' | ')\n};\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_ASSEMBLE_QA', status: state.qa.validation_status, message: missing.length ? state.qa.warning : 'Report assembled with all sections present.' });\nreturn [{ json: state }];"
+        }
+      }
+    ],
+    "connections": {
+      "Subworkflow Input": {
+        "main": [
+          [
+            {
+              "node": "Assemble And QA Report",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Abdullah  Dilshad",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-26T17:12:27.260Z",
+        "id": 270,
+        "workflowId": "Hep7G1mvINz1NdqG",
+        "versionId": "02d7bae6-9867-409d-8eaf-ec44b7ecd0e3",
+        "event": "activated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      },
+      {
+        "createdAt": "2026-06-26T17:12:27.225Z",
+        "id": 269,
+        "workflowId": "Hep7G1mvINz1NdqG",
+        "versionId": "02d7bae6-9867-409d-8eaf-ec44b7ecd0e3",
+        "event": "deactivated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    ]
+  }
+}

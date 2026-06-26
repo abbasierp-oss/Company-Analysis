@@ -1,0 +1,148 @@
+{
+  "updatedAt": "2026-06-26T17:11:18.415Z",
+  "createdAt": "2026-06-26T17:10:01.869Z",
+  "id": "nSibhacyiyR8Vwxx",
+  "name": "DFA - WF_EVENT_RESEARCH",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Subworkflow Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "events",
+      "name": "Build Read Between Lines Event Pack",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nconst filings = state.research?.filings?.recent_filings || [];\nconst serperPublic = state.research?.news_events || [];\nconst serperPrivate = state.research?.private_research?.serper_results || [];\nconst signals = [...serperPublic, ...serperPrivate];\nconst categories = [\n  ['restructuring_layoffs', ['restructuring','layoff','workforce reduction','cost reduction']],\n  ['acquisitions_divestitures', ['acquisition','divestiture','merger','sale of business']],\n  ['leadership_changes', ['ceo','cfo','chief executive','chief financial','leadership transition']],\n  ['segment_reporting_changes', ['segment','reporting change','business unit']],\n  ['accounting_policy_changes', ['accounting policy','restatement','material weakness']],\n  ['litigation_regulatory', ['litigation','regulatory','lawsuit','investigation','antitrust']]\n];\nfunction findSignals(words) {\n  return signals.filter((item) => {\n    const text = `${item.title || ''} ${item.snippet || ''}`.toLowerCase();\n    return words.some((word) => text.includes(word));\n  }).slice(0, 5).map((item) => ({ title: item.title || 'Untitled signal', snippet: item.snippet || '', source_url: item.source_url || item.link || '', source_name: item.source_name || 'Public web signal', source_date: item.source_date || now, confidence: item.confidence || 'LOW' }));\n}\nconst eventPack = categories.map(([category, words]) => {\n  const matches = findSignals(words);\n  return { category, status: matches.length ? 'SUPPORTED_BY_PUBLIC_SIGNAL' : 'N/A', events: matches, interpretation_rule: matches.length ? 'Tie to growth, margin, cash flow, risk, or execution risk only if the source text supports that link.' : 'No supported public signal found in this run.' };\n});\nconst filingEvents = filings.filter((f) => ['8-K','10-Q','10-K'].includes(f.form)).slice(0, 12).map((f) => ({ form: f.form, filing_date: f.filing_date, report_date: f.report_date, source_name: f.source_name, source_url: f.source_url, confidence: f.confidence }));\nconst markdown = ['## Section 7: Read Between The Lines', '', 'This section only treats events as supported when filings or public-source signals exist. Unsupported categories are marked N/A.', '', ...eventPack.map((group) => [`### ${group.category.replaceAll('_',' ')}`, group.status === 'N/A' ? 'N/A - no supported public signal found.' : group.events.map((event) => `- ${event.title}: ${event.snippet} [${event.source_name}, ${event.source_date}]`).join('\\n')].join('\\n')), '', 'Recent filing context:', ...(filingEvents.length ? filingEvents.map((f) => `- ${f.form} filed ${f.filing_date || 'N/A'} for report date ${f.report_date || 'N/A'} (${f.source_name})`) : ['- N/A - no recent filing list available.'])].join('\\n\\n');\nstate.event_research = { generated_at: now, event_pack: eventPack, recent_filings: filingEvents, markdown };\nstate.sections = state.sections || {};\nstate.sections.s7_rtbl = markdown;\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_EVENT_RESEARCH', status: 'OK', message: 'Read-between-lines event pack prepared with supported/N/A categories.' });\nreturn [{ json: state }];"
+      }
+    }
+  ],
+  "connections": {
+    "Subworkflow Input": {
+      "main": [
+        [
+          {
+            "node": "Build Read Between Lines Event Pack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "97d1cb18-d5e1-4ceb-a323-c168949a350f",
+  "activeVersionId": "97d1cb18-d5e1-4ceb-a323-c168949a350f",
+  "versionCounter": 1,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-26T17:10:01.871Z",
+      "createdAt": "2026-06-26T17:10:01.871Z",
+      "role": "workflow:owner",
+      "workflowId": "nSibhacyiyR8Vwxx",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-06-26T17:10:01.871Z",
+    "createdAt": "2026-06-26T17:10:01.871Z",
+    "versionId": "97d1cb18-d5e1-4ceb-a323-c168949a350f",
+    "workflowId": "nSibhacyiyR8Vwxx",
+    "nodes": [
+      {
+        "id": "trigger",
+        "name": "Subworkflow Input",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "events",
+        "name": "Build Read Between Lines Event Pack",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          280,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nconst filings = state.research?.filings?.recent_filings || [];\nconst serperPublic = state.research?.news_events || [];\nconst serperPrivate = state.research?.private_research?.serper_results || [];\nconst signals = [...serperPublic, ...serperPrivate];\nconst categories = [\n  ['restructuring_layoffs', ['restructuring','layoff','workforce reduction','cost reduction']],\n  ['acquisitions_divestitures', ['acquisition','divestiture','merger','sale of business']],\n  ['leadership_changes', ['ceo','cfo','chief executive','chief financial','leadership transition']],\n  ['segment_reporting_changes', ['segment','reporting change','business unit']],\n  ['accounting_policy_changes', ['accounting policy','restatement','material weakness']],\n  ['litigation_regulatory', ['litigation','regulatory','lawsuit','investigation','antitrust']]\n];\nfunction findSignals(words) {\n  return signals.filter((item) => {\n    const text = `${item.title || ''} ${item.snippet || ''}`.toLowerCase();\n    return words.some((word) => text.includes(word));\n  }).slice(0, 5).map((item) => ({ title: item.title || 'Untitled signal', snippet: item.snippet || '', source_url: item.source_url || item.link || '', source_name: item.source_name || 'Public web signal', source_date: item.source_date || now, confidence: item.confidence || 'LOW' }));\n}\nconst eventPack = categories.map(([category, words]) => {\n  const matches = findSignals(words);\n  return { category, status: matches.length ? 'SUPPORTED_BY_PUBLIC_SIGNAL' : 'N/A', events: matches, interpretation_rule: matches.length ? 'Tie to growth, margin, cash flow, risk, or execution risk only if the source text supports that link.' : 'No supported public signal found in this run.' };\n});\nconst filingEvents = filings.filter((f) => ['8-K','10-Q','10-K'].includes(f.form)).slice(0, 12).map((f) => ({ form: f.form, filing_date: f.filing_date, report_date: f.report_date, source_name: f.source_name, source_url: f.source_url, confidence: f.confidence }));\nconst markdown = ['## Section 7: Read Between The Lines', '', 'This section only treats events as supported when filings or public-source signals exist. Unsupported categories are marked N/A.', '', ...eventPack.map((group) => [`### ${group.category.replaceAll('_',' ')}`, group.status === 'N/A' ? 'N/A - no supported public signal found.' : group.events.map((event) => `- ${event.title}: ${event.snippet} [${event.source_name}, ${event.source_date}]`).join('\\n')].join('\\n')), '', 'Recent filing context:', ...(filingEvents.length ? filingEvents.map((f) => `- ${f.form} filed ${f.filing_date || 'N/A'} for report date ${f.report_date || 'N/A'} (${f.source_name})`) : ['- N/A - no recent filing list available.'])].join('\\n\\n');\nstate.event_research = { generated_at: now, event_pack: eventPack, recent_filings: filingEvents, markdown };\nstate.sections = state.sections || {};\nstate.sections.s7_rtbl = markdown;\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_EVENT_RESEARCH', status: 'OK', message: 'Read-between-lines event pack prepared with supported/N/A categories.' });\nreturn [{ json: state }];"
+        }
+      }
+    ],
+    "connections": {
+      "Subworkflow Input": {
+        "main": [
+          [
+            {
+              "node": "Build Read Between Lines Event Pack",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Abdullah  Dilshad",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-26T17:11:19.239Z",
+        "id": 258,
+        "workflowId": "nSibhacyiyR8Vwxx",
+        "versionId": "97d1cb18-d5e1-4ceb-a323-c168949a350f",
+        "event": "activated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    ]
+  }
+}

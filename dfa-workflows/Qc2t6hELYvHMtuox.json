@@ -1,0 +1,1586 @@
+{
+  "updatedAt": "2026-06-26T17:11:44.749Z",
+  "createdAt": "2026-06-24T18:26:56.200Z",
+  "id": "Qc2t6hELYvHMtuox",
+  "name": "DFA - WF_MAIN_PROD",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Production Run Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "init_state",
+      "name": "Initialize Production State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const input = items[0]?.json || {};\nconst body = input.body || input;\nconst now = new Date().toISOString();\nconst slideCountRaw = Number(body.slide_count || body.slideCount || body.inputs?.slide_count || 4);\nconst slideCount = [3,4,5].includes(slideCountRaw) ? slideCountRaw : 4;\nconst existing = body.state || (body.run_id && body.inputs ? body : null);\nif (existing) {\n  existing.updated_at = now;\n  existing.status = existing.status || 'running';\n  existing.current_stage = existing.current_stage || 'initialized';\n  existing.audit_log = existing.audit_log || [];\n  existing.audit_log.push({ timestamp: now, workflow_name: 'WF_MAIN_PROD', status: 'OK', message: 'Production orchestrator received existing state.' });\n  return [{ json: existing }];\n}\nconst peerListRaw = body.peer_list || body.peers || body.known_competitors || '';\nconst peer_list = Array.isArray(peerListRaw) ? peerListRaw : String(peerListRaw || '').split(/[,;\\n|]/).map((s) => s.trim()).filter(Boolean);\nconst state = {\n  run_id: body.run_id || `dfa_prod_${Date.now()}`,\n  created_at: now,\n  updated_at: now,\n  status: 'running',\n  current_stage: 'initialized',\n  inputs: {\n    company_name: body.company_name || body.companyName || body.company || '',\n    ticker: body.ticker || body.symbol || '',\n    exec_type: body.exec_type || body.executive || '',\n    industry: body.industry || '',\n    company_type: body.company_type || body.companyType || 'auto',\n    expert_pref: body.expert_pref || body.expert || '',\n    expert_resolved: body.expert_resolved || null,\n    service_provider: body.service_provider || body.my_company || 'MY COMPANY',\n    peer_list,\n    slide_count: slideCount,\n    deck_type: `gamma_${slideCount}_slide_production`,\n    gamma_api_enabled: Boolean(body.gamma_api_enabled),\n    human_review: Boolean(body.human_review),\n    advanced_context: { source_notes: body.source_notes || body.notes || body.urls || '', peers: peer_list },\n  },\n  entity: null,\n  research: {},\n  normalized: { periods: [], metrics: {}, gaps: [], reliability_map: {}, formulas: {} },\n  sections: {},\n  gamma_deck: null,\n  delivery: {},\n  audit_log: [{ timestamp: now, workflow_name: 'WF_MAIN_PROD', status: 'OK', message: 'Production run initialized with live-data pipeline v2.' }],\n};\nreturn [{ json: state }];"
+      }
+    },
+    {
+      "id": "entity_agent",
+      "name": "Entity Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        540,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "FeMaDjwmiGFGCc6n",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each"
+      }
+    },
+    {
+      "id": "is_public",
+      "name": "Is Public Company?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        820,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is-public",
+              "leftValue": "={{ $json.entity.is_public }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "public_research_agent",
+      "name": "Public Research Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1100,
+        -120
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "vgS7dQ1OeCpHpXrU",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each"
+      }
+    },
+    {
+      "id": "private_research_agent",
+      "name": "Private Research Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1100,
+        140
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "zlSPqKxywAPerZOQ",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each"
+      }
+    },
+    {
+      "id": "normalize_agent",
+      "name": "Normalize Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1380,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "MhFxSrdHKqi4LkE5",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each"
+      }
+    },
+    {
+      "id": "analyze_agent",
+      "name": "Financial Analyst Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2780,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "RLp9AMthAvTC0iBC",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each"
+      }
+    },
+    {
+      "id": "proposal_agent",
+      "name": "Executive Proposal Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        3060,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "u7zcuTFphfzjenZ0",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each"
+      }
+    },
+    {
+      "id": "qa_agent",
+      "name": "Assembly QA Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        3620,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "Hep7G1mvINz1NdqG",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each"
+      }
+    },
+    {
+      "id": "deck_agent",
+      "name": "Gamma Deck Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        3900,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "H7r4ladOcX44a6cu",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each"
+      }
+    },
+    {
+      "id": "delivery_agent",
+      "name": "Delivery Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        4180,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "xpn2OzryO0ZENK8h",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each"
+      }
+    },
+    {
+      "id": "finalize",
+      "name": "Finalize Production Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4460,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nstate.updated_at = now;\nstate.status = state.gamma_deck?.gamma_markdown ? 'completed' : 'completed_with_warnings';\nstate.current_stage = 'ready';\nstate.portal_result = {\n  run_id: state.run_id,\n  status: state.status,\n  company: state.entity,\n  deck_status: state.gamma_deck?.status || 'missing',\n  gamma_markdown: state.gamma_deck?.gamma_markdown || '',\n  final_report_markdown: state.final_report_markdown || '',\n  final_report_markdown: state.final_report_markdown || '',\n  final_report_markdown: state.final_report_markdown || '',\n  slides_json: state.gamma_deck?.slides_json || [],\n  missing_data_notes: state.gamma_deck?.missing_data_notes || [],\n  suggested_gamma_theme: state.gamma_deck?.suggested_gamma_theme || 'Clean executive finance theme',\n  source_coverage: state.normalized?.source_coverage || {},\n  qa: state.qa || {},\n  delivery: state.delivery || {}\n};\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_MAIN_PROD', status: state.status === 'completed' ? 'OK' : 'WARN', message: 'Production run finalized for portal delivery.' });\nreturn [{ json: state }];"
+      }
+    },
+    {
+      "id": "save_final_state",
+      "name": "Save Final Run State",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        4740,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "IdoSLADBWpuuVRmk",
+          "mode": "id",
+          "cachedResultName": "DFA_Run_State"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "run_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.run_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "run_id": "={{ $json.run_id }}",
+            "created_at": "={{ $json.created_at }}",
+            "updated_at": "={{ $json.updated_at }}",
+            "company_name": "={{ $json.inputs.company_name }}",
+            "exec_type": "={{ $json.inputs.exec_type }}",
+            "industry": "={{ $json.inputs.industry }}",
+            "status": "={{ $json.status }}",
+            "state_json": "={{ JSON.stringify($json) }}",
+            "final_report_markdown": "={{ ($json.gamma_deck && $json.gamma_deck.gamma_markdown) ? $json.gamma_deck.gamma_markdown : ($json.final_report_markdown || '') }}",
+            "google_doc_url": "",
+            "pdf_url": ""
+          },
+          "matchingColumns": [
+            "run_id"
+          ],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "return_main_state",
+      "name": "Return Main State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5020,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const state = $('Finalize Production Result').first().json || {};\nreturn [{ json: state }];"
+      }
+    },
+    {
+      "id": "financial_snapshot_agent",
+      "name": "Financial Snapshot Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1660,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "uCs3FRw2T3nplPIE",
+          "mode": "id",
+          "cachedResultName": "DFA - WF_FINANCIAL_SNAPSHOT"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each"
+      }
+    },
+    {
+      "id": "peer_benchmark_agent",
+      "name": "Peer Benchmark Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1940,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "ygI1X49erRcL5Agz",
+          "mode": "id",
+          "cachedResultName": "DFA - WF_PEER_BENCHMARKS"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each"
+      }
+    },
+    {
+      "id": "ratio_dashboard_agent",
+      "name": "Ratio Dashboard Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2220,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "4glaQsweWGS4lmDy",
+          "mode": "id",
+          "cachedResultName": "DFA - WF_RATIO_DASHBOARD"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each"
+      }
+    },
+    {
+      "id": "event_research_agent",
+      "name": "Event Research Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2500,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "nSibhacyiyR8Vwxx",
+          "mode": "id",
+          "cachedResultName": "DFA - WF_EVENT_RESEARCH"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each"
+      }
+    },
+    {
+      "id": "value_realization_agent",
+      "name": "Value Realization Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        3340,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "VY5O6pYOMa28iWJb",
+          "mode": "id",
+          "cachedResultName": "DFA - WF_VALUE_REALIZATION"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each"
+      }
+    },
+    {
+      "id": "approval_agent",
+      "name": "Approval Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        3340,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "tL3TaqFH9zZR0sAo",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each"
+      }
+    }
+  ],
+  "connections": {
+    "Production Run Input": {
+      "main": [
+        [
+          {
+            "node": "Initialize Production State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initialize Production State": {
+      "main": [
+        [
+          {
+            "node": "Entity Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entity Agent": {
+      "main": [
+        [
+          {
+            "node": "Is Public Company?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Public Company?": {
+      "main": [
+        [
+          {
+            "node": "Public Research Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Private Research Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Public Research Agent": {
+      "main": [
+        [
+          {
+            "node": "Normalize Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Private Research Agent": {
+      "main": [
+        [
+          {
+            "node": "Normalize Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Financial Analyst Agent": {
+      "main": [
+        [
+          {
+            "node": "Executive Proposal Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assembly QA Agent": {
+      "main": [
+        [
+          {
+            "node": "Gamma Deck Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gamma Deck Agent": {
+      "main": [
+        [
+          {
+            "node": "Delivery Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delivery Agent": {
+      "main": [
+        [
+          {
+            "node": "Finalize Production Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Production Result": {
+      "main": [
+        [
+          {
+            "node": "Save Final Run State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Final Run State": {
+      "main": [
+        [
+          {
+            "node": "Return Main State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Agent": {
+      "main": [
+        [
+          {
+            "node": "Financial Snapshot Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Financial Snapshot Agent": {
+      "main": [
+        [
+          {
+            "node": "Peer Benchmark Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Peer Benchmark Agent": {
+      "main": [
+        [
+          {
+            "node": "Ratio Dashboard Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ratio Dashboard Agent": {
+      "main": [
+        [
+          {
+            "node": "Event Research Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Event Research Agent": {
+      "main": [
+        [
+          {
+            "node": "Financial Analyst Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executive Proposal Agent": {
+      "main": [
+        [
+          {
+            "node": "Value Realization Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Value Realization Agent": {
+      "main": [
+        [
+          {
+            "node": "Approval Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approval Agent": {
+      "main": [
+        [
+          {
+            "node": "Assembly QA Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "executionTimeout": 1800
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "da977f12-bbfd-4ca1-a534-bee86687ebe9",
+  "activeVersionId": "da977f12-bbfd-4ca1-a534-bee86687ebe9",
+  "versionCounter": 3,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-24T18:26:56.202Z",
+      "createdAt": "2026-06-24T18:26:56.202Z",
+      "role": "workflow:owner",
+      "workflowId": "Qc2t6hELYvHMtuox",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-06-24T11:25:52.602Z",
+      "createdAt": "2026-06-24T11:25:52.602Z",
+      "id": "PvqNmKlzG0X72TtP",
+      "name": "DFA Analyst System"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-06-26T17:11:44.749Z",
+    "createdAt": "2026-06-26T17:11:44.749Z",
+    "versionId": "da977f12-bbfd-4ca1-a534-bee86687ebe9",
+    "workflowId": "Qc2t6hELYvHMtuox",
+    "nodes": [
+      {
+        "id": "trigger",
+        "name": "Production Run Input",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "inputSource": "passthrough"
+        }
+      },
+      {
+        "id": "init_state",
+        "name": "Initialize Production State",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          260,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const input = items[0]?.json || {};\nconst body = input.body || input;\nconst now = new Date().toISOString();\nconst slideCountRaw = Number(body.slide_count || body.slideCount || body.inputs?.slide_count || 4);\nconst slideCount = [3,4,5].includes(slideCountRaw) ? slideCountRaw : 4;\nconst existing = body.state || (body.run_id && body.inputs ? body : null);\nif (existing) {\n  existing.updated_at = now;\n  existing.status = existing.status || 'running';\n  existing.current_stage = existing.current_stage || 'initialized';\n  existing.audit_log = existing.audit_log || [];\n  existing.audit_log.push({ timestamp: now, workflow_name: 'WF_MAIN_PROD', status: 'OK', message: 'Production orchestrator received existing state.' });\n  return [{ json: existing }];\n}\nconst companyName = body.company_name || body.companyName || body.company || '';\nconst ticker = body.ticker || body.symbol || '';\nconst industry = body.industry || '';\nconst execType = body.exec_type || body.executive || 'CFO';\nconst runId = body.run_id || `dfa_prod_${Date.now()}`;\nconst state = {\n  run_id: runId,\n  created_at: now,\n  updated_at: now,\n  status: 'running',\n  current_stage: 'initialized',\n  inputs: {\n    company_name: companyName,\n    ticker,\n    exec_type: execType,\n    industry,\n    company_type: body.company_type || body.companyType || 'auto',\n    expert_pref: body.expert_pref || body.expert || 'pick for me',\n    slide_count: slideCount,\n    deck_type: `gamma_${slideCount}_slide_production`,\n    gamma_api_enabled: Boolean(body.gamma_api_enabled),\n    advanced_context: { source_notes: body.source_notes || body.notes || body.urls || '' }\n  },\n  entity: null,\n  research: {},\n  normalized: { periods: [], metrics: {}, gaps: [], reliability_map: {}, formulas: {} },\n  sections: {},\n  gamma_deck: null,\n  delivery: {},\n  audit_log: [{ timestamp: now, workflow_name: 'WF_MAIN_PROD', status: 'OK', message: 'Production run initialized.' }]\n};\nreturn [{ json: state }];"
+        }
+      },
+      {
+        "id": "entity_agent",
+        "name": "Entity Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.3,
+        "position": [
+          540,
+          0
+        ],
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "FeMaDjwmiGFGCc6n",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "mode": "each"
+        }
+      },
+      {
+        "id": "is_public",
+        "name": "Is Public Company?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          820,
+          0
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "is-public",
+                "leftValue": "={{ $json.entity.is_public }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          }
+        }
+      },
+      {
+        "id": "public_research_agent",
+        "name": "Public Research Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.3,
+        "position": [
+          1100,
+          -120
+        ],
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "vgS7dQ1OeCpHpXrU",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "mode": "each"
+        }
+      },
+      {
+        "id": "private_research_agent",
+        "name": "Private Research Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.3,
+        "position": [
+          1100,
+          140
+        ],
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "zlSPqKxywAPerZOQ",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "mode": "each"
+        }
+      },
+      {
+        "id": "normalize_agent",
+        "name": "Normalize Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.3,
+        "position": [
+          1380,
+          0
+        ],
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "MhFxSrdHKqi4LkE5",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "mode": "each"
+        }
+      },
+      {
+        "id": "analyze_agent",
+        "name": "Financial Analyst Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.3,
+        "position": [
+          2780,
+          0
+        ],
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "RLp9AMthAvTC0iBC",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "mode": "each"
+        }
+      },
+      {
+        "id": "proposal_agent",
+        "name": "Executive Proposal Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.3,
+        "position": [
+          3060,
+          0
+        ],
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "u7zcuTFphfzjenZ0",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "mode": "each"
+        }
+      },
+      {
+        "id": "qa_agent",
+        "name": "Assembly QA Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.3,
+        "position": [
+          3620,
+          0
+        ],
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "Hep7G1mvINz1NdqG",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "mode": "each"
+        }
+      },
+      {
+        "id": "deck_agent",
+        "name": "Gamma Deck Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.3,
+        "position": [
+          3900,
+          0
+        ],
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "H7r4ladOcX44a6cu",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "mode": "each"
+        }
+      },
+      {
+        "id": "delivery_agent",
+        "name": "Delivery Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.3,
+        "position": [
+          4180,
+          0
+        ],
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "xpn2OzryO0ZENK8h",
+            "mode": "id"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "mode": "each"
+        }
+      },
+      {
+        "id": "finalize",
+        "name": "Finalize Production Result",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4460,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nstate.updated_at = now;\nstate.status = state.gamma_deck?.gamma_markdown ? 'completed' : 'completed_with_warnings';\nstate.current_stage = 'ready';\nstate.portal_result = {\n  run_id: state.run_id,\n  status: state.status,\n  company: state.entity,\n  deck_status: state.gamma_deck?.status || 'missing',\n  gamma_markdown: state.gamma_deck?.gamma_markdown || '',\n  slides_json: state.gamma_deck?.slides_json || [],\n  missing_data_notes: state.gamma_deck?.missing_data_notes || [],\n  suggested_gamma_theme: state.gamma_deck?.suggested_gamma_theme || 'Clean executive finance theme',\n  source_coverage: state.normalized?.source_coverage || {},\n  qa: state.qa || {},\n  delivery: state.delivery || {}\n};\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_MAIN_PROD', status: state.status === 'completed' ? 'OK' : 'WARN', message: 'Production run finalized for portal delivery.' });\nreturn [{ json: state }];"
+        }
+      },
+      {
+        "id": "save_final_state",
+        "name": "Save Final Run State",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "position": [
+          4740,
+          0
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "upsert",
+          "dataTableId": {
+            "__rl": true,
+            "value": "IdoSLADBWpuuVRmk",
+            "mode": "id",
+            "cachedResultName": "DFA_Run_State"
+          },
+          "matchType": "allConditions",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "run_id",
+                "condition": "eq",
+                "keyValue": "={{ $json.run_id }}"
+              }
+            ]
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "run_id": "={{ $json.run_id }}",
+              "created_at": "={{ $json.created_at }}",
+              "updated_at": "={{ $json.updated_at }}",
+              "company_name": "={{ $json.inputs.company_name }}",
+              "exec_type": "={{ $json.inputs.exec_type }}",
+              "industry": "={{ $json.inputs.industry }}",
+              "status": "={{ $json.status }}",
+              "state_json": "={{ JSON.stringify($json) }}",
+              "final_report_markdown": "={{ ($json.gamma_deck && $json.gamma_deck.gamma_markdown) ? $json.gamma_deck.gamma_markdown : ($json.final_report_markdown || '') }}",
+              "google_doc_url": "",
+              "pdf_url": ""
+            },
+            "matchingColumns": [
+              "run_id"
+            ],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "return_main_state",
+        "name": "Return Main State",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          5020,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const state = $('Finalize Production Result').first().json || {};\nreturn [{ json: state }];"
+        }
+      },
+      {
+        "id": "financial_snapshot_agent",
+        "name": "Financial Snapshot Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.3,
+        "position": [
+          1660,
+          0
+        ],
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "uCs3FRw2T3nplPIE",
+            "mode": "id",
+            "cachedResultName": "DFA - WF_FINANCIAL_SNAPSHOT"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "mode": "each"
+        }
+      },
+      {
+        "id": "peer_benchmark_agent",
+        "name": "Peer Benchmark Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.3,
+        "position": [
+          1940,
+          0
+        ],
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "ygI1X49erRcL5Agz",
+            "mode": "id",
+            "cachedResultName": "DFA - WF_PEER_BENCHMARKS"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "mode": "each"
+        }
+      },
+      {
+        "id": "ratio_dashboard_agent",
+        "name": "Ratio Dashboard Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.3,
+        "position": [
+          2220,
+          0
+        ],
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "4glaQsweWGS4lmDy",
+            "mode": "id",
+            "cachedResultName": "DFA - WF_RATIO_DASHBOARD"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "mode": "each"
+        }
+      },
+      {
+        "id": "event_research_agent",
+        "name": "Event Research Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.3,
+        "position": [
+          2500,
+          0
+        ],
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "nSibhacyiyR8Vwxx",
+            "mode": "id",
+            "cachedResultName": "DFA - WF_EVENT_RESEARCH"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "mode": "each"
+        }
+      },
+      {
+        "id": "value_realization_agent",
+        "name": "Value Realization Agent",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1.3,
+        "position": [
+          3340,
+          0
+        ],
+        "parameters": {
+          "workflowId": {
+            "__rl": true,
+            "value": "VY5O6pYOMa28iWJb",
+            "mode": "id",
+            "cachedResultName": "DFA - WF_VALUE_REALIZATION"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "mode": "each"
+        }
+      }
+    ],
+    "connections": {
+      "Production Run Input": {
+        "main": [
+          [
+            {
+              "node": "Initialize Production State",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Initialize Production State": {
+        "main": [
+          [
+            {
+              "node": "Entity Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Entity Agent": {
+        "main": [
+          [
+            {
+              "node": "Is Public Company?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Is Public Company?": {
+        "main": [
+          [
+            {
+              "node": "Public Research Agent",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Private Research Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Public Research Agent": {
+        "main": [
+          [
+            {
+              "node": "Normalize Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Private Research Agent": {
+        "main": [
+          [
+            {
+              "node": "Normalize Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Financial Analyst Agent": {
+        "main": [
+          [
+            {
+              "node": "Executive Proposal Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Assembly QA Agent": {
+        "main": [
+          [
+            {
+              "node": "Gamma Deck Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Gamma Deck Agent": {
+        "main": [
+          [
+            {
+              "node": "Delivery Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Delivery Agent": {
+        "main": [
+          [
+            {
+              "node": "Finalize Production Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Finalize Production Result": {
+        "main": [
+          [
+            {
+              "node": "Save Final Run State",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Save Final Run State": {
+        "main": [
+          [
+            {
+              "node": "Return Main State",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normalize Agent": {
+        "main": [
+          [
+            {
+              "node": "Financial Snapshot Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Financial Snapshot Agent": {
+        "main": [
+          [
+            {
+              "node": "Peer Benchmark Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Peer Benchmark Agent": {
+        "main": [
+          [
+            {
+              "node": "Ratio Dashboard Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ratio Dashboard Agent": {
+        "main": [
+          [
+            {
+              "node": "Event Research Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Event Research Agent": {
+        "main": [
+          [
+            {
+              "node": "Financial Analyst Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Executive Proposal Agent": {
+        "main": [
+          [
+            {
+              "node": "Value Realization Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Value Realization Agent": {
+        "main": [
+          [
+            {
+              "node": "Assembly QA Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Abdullah  Dilshad",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-26T17:11:44.953Z",
+        "id": 264,
+        "workflowId": "Qc2t6hELYvHMtuox",
+        "versionId": "da977f12-bbfd-4ca1-a534-bee86687ebe9",
+        "event": "activated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      },
+      {
+        "createdAt": "2026-06-26T17:11:44.915Z",
+        "id": 263,
+        "workflowId": "Qc2t6hELYvHMtuox",
+        "versionId": "da977f12-bbfd-4ca1-a534-bee86687ebe9",
+        "event": "deactivated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    ]
+  }
+}

@@ -1,0 +1,242 @@
+{
+  "updatedAt": "2026-06-24T18:32:11.819Z",
+  "createdAt": "2026-06-24T10:33:21.305Z",
+  "id": "FeMaDjwmiGFGCc6n",
+  "name": "DFA - WF_ENTITY",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Subworkflow Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "logic",
+      "name": "Resolve Entity Contract",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        540,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const input = $('Subworkflow Input').first().json || {};\nconst state = input.state || input;\nconst directory = items[0]?.json || {};\nconst rows = Array.isArray(directory) ? directory : Object.values(directory);\nconst now = new Date().toISOString();\nconst companyName = state.inputs?.company_name || input.company_name || '';\nconst tickerInput = state.inputs?.ticker || input.ticker || '';\nfunction norm(value) {\n  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');\n}\nconst nameNorm = norm(companyName);\nconst tickerNorm = norm(tickerInput);\nfunction score(row) {\n  const title = row.title || row.name || '';\n  const ticker = row.ticker || '';\n  const titleNorm = norm(title);\n  const rowTickerNorm = norm(ticker);\n  let points = 0;\n  if (tickerNorm && rowTickerNorm === tickerNorm) points += 120;\n  if (titleNorm === nameNorm) points += 100;\n  if (nameNorm && titleNorm.startsWith(nameNorm)) points += 70;\n  if (nameNorm && titleNorm.includes(nameNorm)) points += 45;\n  if (tickerNorm && rowTickerNorm.includes(tickerNorm)) points += 20;\n  return points;\n}\nconst ranked = rows\n  .filter((row) => row && (row.title || row.name) && (row.cik_str || row.cik))\n  .map((row) => ({ row, score: score(row) }))\n  .filter((entry) => entry.score > 0)\n  .sort((a, b) => b.score - a.score);\nconst best = ranked[0]?.row || null;\nconst rawCik = best?.cik_str || best?.cik || null;\nconst cik = rawCik ? String(rawCik).replace(/\\D/g, '').padStart(10, '0') : null;\nstate.entity = {\n  legal_name: best?.title || companyName || null,\n  ticker: best?.ticker || tickerInput || null,\n  cik,\n  exchange: null,\n  fiscal_year_end: null,\n  reporting_currency: 'USD',\n  is_public: Boolean(cik),\n  confidence: cik && ranked[0].score >= 80 ? 'HIGH' : (cik ? 'MEDIUM' : 'LOW'),\n  sources: [{ source_name: 'SEC Company Tickers Directory', source_url: 'https://www.sec.gov/files/company_tickers.json', source_date: now, confidence: cik ? 'HIGH' : 'LOW' }]\n};\nstate.agent_status = state.agent_status || {};\nstate.agent_status.entity = cik ? 'resolved_public_company' : 'private_or_unresolved_public_company';\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_ENTITY', status: cik ? 'OK' : 'WARN', message: cik ? `Resolved ${state.entity.legal_name} with CIK ${cik}.` : 'No SEC public-company match; route to private/public-web research.' });\nreturn [{ json: state }];"
+      }
+    },
+    {
+      "id": "fetch_sec_directory",
+      "name": "Fetch SEC Company Directory",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "url": "https://www.sec.gov/files/company_tickers.json",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "DFA Analyst System contact@example.com"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Subworkflow Input": {
+      "main": [
+        [
+          {
+            "node": "Fetch SEC Company Directory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch SEC Company Directory": {
+      "main": [
+        [
+          {
+            "node": "Resolve Entity Contract",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Karachi",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "executionTimeout": 300,
+    "saveExecutionProgress": false
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "0c3ca674-3d58-420d-9afc-403805da6c54",
+  "activeVersionId": "0c3ca674-3d58-420d-9afc-403805da6c54",
+  "versionCounter": 3,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-24T10:33:21.307Z",
+      "createdAt": "2026-06-24T10:33:21.307Z",
+      "role": "workflow:owner",
+      "workflowId": "FeMaDjwmiGFGCc6n",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-06-24T11:25:52.602Z",
+      "createdAt": "2026-06-24T11:25:52.602Z",
+      "id": "PvqNmKlzG0X72TtP",
+      "name": "DFA Analyst System"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-06-24T18:24:21.814Z",
+    "createdAt": "2026-06-24T18:24:21.814Z",
+    "versionId": "0c3ca674-3d58-420d-9afc-403805da6c54",
+    "workflowId": "FeMaDjwmiGFGCc6n",
+    "nodes": [
+      {
+        "id": "trigger",
+        "name": "Subworkflow Input",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "inputSource": "passthrough"
+        }
+      },
+      {
+        "id": "logic",
+        "name": "Resolve Entity Contract",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          540,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const input = $('Subworkflow Input').first().json || {};\nconst state = input.state || input;\nconst directory = items[0]?.json || {};\nconst rows = Array.isArray(directory) ? directory : Object.values(directory);\nconst now = new Date().toISOString();\nconst companyName = state.inputs?.company_name || input.company_name || '';\nconst tickerInput = state.inputs?.ticker || input.ticker || '';\nfunction norm(value) {\n  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');\n}\nconst nameNorm = norm(companyName);\nconst tickerNorm = norm(tickerInput);\nfunction score(row) {\n  const title = row.title || row.name || '';\n  const ticker = row.ticker || '';\n  const titleNorm = norm(title);\n  const rowTickerNorm = norm(ticker);\n  let points = 0;\n  if (tickerNorm && rowTickerNorm === tickerNorm) points += 120;\n  if (titleNorm === nameNorm) points += 100;\n  if (nameNorm && titleNorm.startsWith(nameNorm)) points += 70;\n  if (nameNorm && titleNorm.includes(nameNorm)) points += 45;\n  if (tickerNorm && rowTickerNorm.includes(tickerNorm)) points += 20;\n  return points;\n}\nconst ranked = rows\n  .filter((row) => row && (row.title || row.name) && (row.cik_str || row.cik))\n  .map((row) => ({ row, score: score(row) }))\n  .filter((entry) => entry.score > 0)\n  .sort((a, b) => b.score - a.score);\nconst best = ranked[0]?.row || null;\nconst rawCik = best?.cik_str || best?.cik || null;\nconst cik = rawCik ? String(rawCik).replace(/\\D/g, '').padStart(10, '0') : null;\nstate.entity = {\n  legal_name: best?.title || companyName || null,\n  ticker: best?.ticker || tickerInput || null,\n  cik,\n  exchange: null,\n  fiscal_year_end: null,\n  reporting_currency: 'USD',\n  is_public: Boolean(cik),\n  confidence: cik && ranked[0].score >= 80 ? 'HIGH' : (cik ? 'MEDIUM' : 'LOW'),\n  sources: [{ source_name: 'SEC Company Tickers Directory', source_url: 'https://www.sec.gov/files/company_tickers.json', source_date: now, confidence: cik ? 'HIGH' : 'LOW' }]\n};\nstate.agent_status = state.agent_status || {};\nstate.agent_status.entity = cik ? 'resolved_public_company' : 'private_or_unresolved_public_company';\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_ENTITY', status: cik ? 'OK' : 'WARN', message: cik ? `Resolved ${state.entity.legal_name} with CIK ${cik}.` : 'No SEC public-company match; route to private/public-web research.' });\nreturn [{ json: state }];"
+        }
+      },
+      {
+        "id": "fetch_sec_directory",
+        "name": "Fetch SEC Company Directory",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          260,
+          0
+        ],
+        "parameters": {
+          "url": "https://www.sec.gov/files/company_tickers.json",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "User-Agent",
+                "value": "DFA Analyst System contact@example.com"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Subworkflow Input": {
+        "main": [
+          [
+            {
+              "node": "Fetch SEC Company Directory",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch SEC Company Directory": {
+        "main": [
+          [
+            {
+              "node": "Resolve Entity Contract",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Abdullah  Dilshad",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-24T18:32:12.944Z",
+        "id": 183,
+        "workflowId": "FeMaDjwmiGFGCc6n",
+        "versionId": "0c3ca674-3d58-420d-9afc-403805da6c54",
+        "event": "activated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    ]
+  }
+}

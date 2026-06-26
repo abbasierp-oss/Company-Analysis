@@ -1,0 +1,312 @@
+{
+  "updatedAt": "2026-06-25T15:25:05.713Z",
+  "createdAt": "2026-06-24T18:30:28.782Z",
+  "id": "n7RG6ijbdmdOrGll",
+  "name": "DFA - API Run Status",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "webhook_status",
+      "name": "Run Status Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "dfa-production/status",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "webhookId": "cba3d5f5-d90a-4fca-9b66-f0e5f4e536c7"
+    },
+    {
+      "id": "get_state",
+      "name": "Get Run State Row",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        280,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "IdoSLADBWpuuVRmk",
+          "mode": "id",
+          "cachedResultName": "DFA_Run_State"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "run_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.query.run_id || $json.body.run_id || '' }}"
+            }
+          ]
+        },
+        "returnAll": false,
+        "limit": 1
+      }
+    },
+    {
+      "id": "build_status",
+      "name": "Build Status Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const row = items[0]?.json || null;\nlet state = null;\ntry { state = row?.state_json ? JSON.parse(row.state_json) : null; } catch (e) {}\nreturn [{ json: {\n  success: Boolean(row?.run_id),\n  run_id: row?.run_id || null,\n  status: row?.status || 'not_found',\n  company_name: row?.company_name || null,\n  current_stage: state?.current_stage || (row?.status === 'completed' ? 'ready' : 'unknown'),\n  deck_status: state?.gamma_deck?.status || null,\n  updated_at: row?.updated_at || null,\n  audit_log: (state?.audit_log || []).slice(-8),\n  message: row?.run_id ? 'Run found.' : 'No run found for the supplied run_id.'\n} }];"
+      }
+    },
+    {
+      "id": "respond_status",
+      "name": "Return Status JSON",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        840,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Run Status Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Run State Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Run State Row": {
+      "main": [
+        [
+          {
+            "node": "Build Status Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Status Response": {
+      "main": [
+        [
+          {
+            "node": "Return Status JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "bbc64150-192a-436f-adb8-7aac80c46144",
+  "activeVersionId": "bbc64150-192a-436f-adb8-7aac80c46144",
+  "versionCounter": 1,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-24T18:30:28.783Z",
+      "createdAt": "2026-06-24T18:30:28.783Z",
+      "role": "workflow:owner",
+      "workflowId": "n7RG6ijbdmdOrGll",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-06-24T11:25:52.602Z",
+      "createdAt": "2026-06-24T11:25:52.602Z",
+      "id": "PvqNmKlzG0X72TtP",
+      "name": "DFA Analyst System"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-06-24T18:30:28.784Z",
+    "createdAt": "2026-06-24T18:30:28.784Z",
+    "versionId": "bbc64150-192a-436f-adb8-7aac80c46144",
+    "workflowId": "n7RG6ijbdmdOrGll",
+    "nodes": [
+      {
+        "id": "webhook_status",
+        "name": "Run Status Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "httpMethod": "GET",
+          "path": "dfa-production/status",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "onError": "continueRegularOutput",
+        "webhookId": "cba3d5f5-d90a-4fca-9b66-f0e5f4e536c7"
+      },
+      {
+        "id": "get_state",
+        "name": "Get Run State Row",
+        "type": "n8n-nodes-base.dataTable",
+        "typeVersion": 1.1,
+        "position": [
+          280,
+          0
+        ],
+        "parameters": {
+          "resource": "row",
+          "operation": "get",
+          "dataTableId": {
+            "__rl": true,
+            "value": "IdoSLADBWpuuVRmk",
+            "mode": "id",
+            "cachedResultName": "DFA_Run_State"
+          },
+          "matchType": "allConditions",
+          "filters": {
+            "conditions": [
+              {
+                "keyName": "run_id",
+                "condition": "eq",
+                "keyValue": "={{ $json.query.run_id || $json.body.run_id || '' }}"
+              }
+            ]
+          },
+          "returnAll": false,
+          "limit": 1
+        }
+      },
+      {
+        "id": "build_status",
+        "name": "Build Status Response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          560,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const row = items[0]?.json || null;\nlet state = null;\ntry { state = row?.state_json ? JSON.parse(row.state_json) : null; } catch (e) {}\nreturn [{ json: {\n  success: Boolean(row?.run_id),\n  run_id: row?.run_id || null,\n  status: row?.status || 'not_found',\n  company_name: row?.company_name || null,\n  current_stage: state?.current_stage || (row?.status === 'completed' ? 'ready' : 'unknown'),\n  deck_status: state?.gamma_deck?.status || null,\n  updated_at: row?.updated_at || null,\n  audit_log: (state?.audit_log || []).slice(-8),\n  message: row?.run_id ? 'Run found.' : 'No run found for the supplied run_id.'\n} }];"
+        }
+      },
+      {
+        "id": "respond_status",
+        "name": "Return Status JSON",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.5,
+        "position": [
+          840,
+          0
+        ],
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ JSON.stringify($json) }}",
+          "options": {
+            "responseCode": 200
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Run Status Webhook": {
+        "main": [
+          [
+            {
+              "node": "Get Run State Row",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Get Run State Row": {
+        "main": [
+          [
+            {
+              "node": "Build Status Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Status Response": {
+        "main": [
+          [
+            {
+              "node": "Return Status JSON",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Abdullah  Dilshad",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-24T18:32:00.507Z",
+        "id": 177,
+        "workflowId": "n7RG6ijbdmdOrGll",
+        "versionId": "bbc64150-192a-436f-adb8-7aac80c46144",
+        "event": "activated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    ]
+  }
+}

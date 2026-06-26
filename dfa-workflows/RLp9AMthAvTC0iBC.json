@@ -1,0 +1,532 @@
+{
+  "updatedAt": "2026-06-26T17:12:08.846Z",
+  "createdAt": "2026-06-24T10:33:30.410Z",
+  "id": "RLp9AMthAvTC0iBC",
+  "name": "DFA - WF_ANALYZE",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Subworkflow Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "logic",
+      "name": "Prepare Claude Analysis Payloads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Shared DFA financial utilities (inlined into n8n Code nodes)\nconst SEC_UA = 'DamodaranAnalystSystem/2.0 contact@goevolo.com';\n\nfunction normName(v) {\n  return String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');\n}\n\nfunction tagRows(facts, tags) {\n  for (const tag of tags) {\n    const fact = facts[tag];\n    if (!fact?.units) continue;\n    const rows = Object.values(fact.units).flat().filter((r) => r && r.val !== undefined);\n    if (rows.length) return { tag, rows };\n  }\n  return { tag: tags[0], rows: [] };\n}\n\nfunction latestAnnualRow(rows, fy) {\n  return rows\n    .filter((r) => r.form === '10-K' && Number(r.fy) === Number(fy))\n    .sort((a, b) => String(a.end || '').localeCompare(String(b.end || '')) || String(a.filed || '').localeCompare(String(b.filed || '')))\n    .at(-1) || null;\n}\n\nfunction latestQuarterRows(rows) {\n  const qrows = rows.filter((r) => r.form === '10-Q' && r.fy && r.fp)\n    .sort((a, b) => String(a.end || '').localeCompare(String(b.end || '')) || String(a.filed || '').localeCompare(String(b.filed || '')));\n  const uniq = [];\n  for (const row of qrows) {\n    const key = `${row.fy}-${row.fp}`;\n    if (!uniq.some((p) => p.key === key)) uniq.push({ key, fy: row.fy, fp: row.fp, end: row.end, filed: row.filed });\n  }\n  return uniq;\n}\n\nfunction compactFacts(usGaapAll) {\n  const supported = [\n    'RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet',\n    'GrossProfit', 'OperatingIncomeLoss', 'NetIncomeLoss', 'ProfitLoss',\n    'NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations',\n    'PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets',\n    'LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent', 'LongTermDebtAndFinanceLeaseObligationsCurrent',\n    'AssetsCurrent', 'LiabilitiesCurrent', 'InterestExpenseNonOperating', 'InterestExpense',\n    'EarningsPerShareDiluted', 'DepreciationDepletionAndAmortization', 'DepreciationDepletionAndAmortizationExpense', 'DepreciationAndAmortization',\n    'StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest',\n    'Assets', 'Liabilities', 'CashAndCashEquivalentsAtCarryingValue', 'ShortTermBorrowings'\n  ];\n  const out = {};\n  for (const tag of supported) {\n    const fact = usGaapAll[tag];\n    if (!fact?.units) continue;\n    const units = {};\n    for (const [unitName, rows] of Object.entries(fact.units)) {\n      if (!Array.isArray(rows)) continue;\n      const compact = rows\n        .filter((r) => r && r.val !== undefined && ['10-K', '10-Q'].includes(r.form))\n        .sort((a, b) => String(a.filed || '').localeCompare(String(b.filed || '')) || String(a.end || '').localeCompare(String(b.end || '')))\n        .slice(-20)\n        .map((r) => ({ end: r.end, val: r.val, fy: r.fy, fp: r.fp, form: r.form, filed: r.filed, frame: r.frame }));\n      if (compact.length) units[unitName] = compact;\n    }\n    if (Object.keys(units).length) out[tag] = { label: fact.label, units };\n  }\n  return out;\n}\n\nfunction resolveCikFromDirectory(directory, companyName, ticker) {\n  const rows = Array.isArray(directory) ? directory : Object.values(directory || {});\n  const nameNorm = normName(companyName);\n  const tickerNorm = normName(ticker);\n  function score(row) {\n    const title = row.title || row.name || '';\n    const rowTicker = row.ticker || '';\n    const titleNorm = normName(title);\n    const rowTickerNorm = normName(rowTicker);\n    let points = 0;\n    if (tickerNorm && rowTickerNorm === tickerNorm) points += 120;\n    if (titleNorm === nameNorm) points += 100;\n    if (nameNorm && titleNorm.startsWith(nameNorm)) points += 70;\n    if (nameNorm && titleNorm.includes(nameNorm)) points += 45;\n    return points;\n  }\n  const ranked = rows\n    .filter((row) => row && (row.title || row.name) && (row.cik_str || row.cik))\n    .map((row) => ({ row, score: score(row) }))\n    .filter((e) => e.score > 0)\n    .sort((a, b) => b.score - a.score);\n  const best = ranked[0]?.row || null;\n  const rawCik = best?.cik_str || best?.cik || null;\n  const cik = rawCik ? String(rawCik).padStart(10, '0') : null;\n  return { best, cik, ranked };\n}\n\nfunction metricFromFacts(facts, metric, fy) {\n  const map = {\n    revenue: ['RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet'],\n    gross_profit: ['GrossProfit'],\n    operating_income: ['OperatingIncomeLoss'],\n    net_income: ['NetIncomeLoss', 'ProfitLoss'],\n    operating_cash_flow: ['NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations'],\n    capex: ['PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets'],\n    long_term_debt: ['LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent'],\n    current_assets: ['AssetsCurrent'],\n    current_liabilities: ['LiabilitiesCurrent'],\n    interest_expense: ['InterestExpenseNonOperating', 'InterestExpense'],\n    equity: ['StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest'],\n    assets: ['Assets'],\n    cash: ['CashAndCashEquivalentsAtCarryingValue'],\n    depreciation: ['DepreciationDepletionAndAmortization', 'DepreciationDepletionAndAmortizationExpense', 'DepreciationAndAmortization']\n  };\n  const found = tagRows(facts, map[metric] || [metric]);\n  const row = latestAnnualRow(found.rows, fy);\n  return row ? Number(row.val) : null;\n}\n\nfunction computeEntityMetrics(facts, sourceMeta) {\n  const years = [2025, 2024, 2023];\n  const latestFy = years.find((fy) => metricFromFacts(facts, 'revenue', fy) !== null) || years[1];\n  const revenue = metricFromFacts(facts, 'revenue', latestFy);\n  const gross = metricFromFacts(facts, 'gross_profit', latestFy);\n  const op = metricFromFacts(facts, 'operating_income', latestFy);\n  const net = metricFromFacts(facts, 'net_income', latestFy);\n  const ocf = metricFromFacts(facts, 'operating_cash_flow', latestFy);\n  const capex = metricFromFacts(facts, 'capex', latestFy);\n  const ca = metricFromFacts(facts, 'current_assets', latestFy);\n  const cl = metricFromFacts(facts, 'current_liabilities', latestFy);\n  const interest = metricFromFacts(facts, 'interest_expense', latestFy);\n  const debt = metricFromFacts(facts, 'long_term_debt', latestFy);\n  const equity = metricFromFacts(facts, 'equity', latestFy);\n  const assets = metricFromFacts(facts, 'assets', latestFy);\n  const cash = metricFromFacts(facts, 'cash', latestFy);\n  const dep = metricFromFacts(facts, 'depreciation', latestFy);\n  const revY1 = metricFromFacts(facts, 'revenue', latestFy - 1);\n  const revY3 = metricFromFacts(facts, 'revenue', latestFy - 3);\n  const fcf = ocf !== null && capex !== null ? ocf - capex : null;\n  const ebitda = op !== null && dep !== null ? op + dep : null;\n  const safeDiv = (a, b) => (a !== null && b !== null && b !== 0 ? a / b : null);\n  return {\n    period: `FY${latestFy}`,\n    revenue,\n    gross_margin: safeDiv(gross, revenue),\n    operating_margin: safeDiv(op, revenue),\n    net_margin: safeDiv(net, revenue),\n    ebitda_margin: safeDiv(ebitda, revenue),\n    fcf_margin: safeDiv(fcf, revenue),\n    current_ratio: safeDiv(ca, cl),\n    debt_to_equity: safeDiv(debt, equity),\n    interest_coverage: safeDiv(op, interest),\n    roce: safeDiv(op, assets && cl !== null ? assets - cl : null),\n    asset_turnover: safeDiv(revenue, assets),\n    yoy_revenue_growth: safeDiv(revenue && revY1 ? revenue - revY1 : null, revY1),\n    revenue_cagr_3y: revY3 && revenue && revY3 > 0 ? Math.pow(revenue / revY3, 1 / 3) - 1 : null,\n    net_debt_ebitda: ebitda && debt !== null && cash !== null && ebitda !== 0 ? (debt - cash) / ebitda : null,\n    source_meta: sourceMeta\n  };\n}\n\nfunction fmtMetric(v, asPct = false) {\n  if (v === null || v === undefined || Number.isNaN(v)) return 'N/A';\n  if (asPct) return `${(v * 100).toFixed(1)}%`;\n  if (Math.abs(v) >= 1e9) return `${(v / 1e9).toFixed(2)}B USD`;\n  if (Math.abs(v) >= 1e6) return `${(v / 1e6).toFixed(1)}M USD`;\n  return `${Number(v).toLocaleString('en-US')} USD`;\n}\n\nfunction peerDefaults(industry) {\n  const key = String(industry || '').toLowerCase();\n  const defaults = {\n    technology: ['Microsoft', 'Alphabet', 'Meta Platforms', 'Amazon', 'NVIDIA'],\n    saas: ['Salesforce', 'Adobe', 'ServiceNow', 'Atlassian', 'Workday'],\n    retail: ['Walmart', 'Costco', 'Target', 'Amazon', 'Home Depot'],\n    banking: ['JPMorgan Chase', 'Bank of America', 'Wells Fargo', 'Citigroup', 'Goldman Sachs'],\n    healthcare: ['UnitedHealth Group', 'HCA Healthcare', 'Elevance Health', 'CVS Health', 'Humana'],\n    manufacturing: ['General Electric', 'Honeywell', 'Caterpillar', '3M', 'Siemens'],\n    gaming: ['Electronic Arts', 'Take-Two Interactive', 'Roblox', 'Nintendo', 'Sony'],\n    media: ['Disney', 'Netflix', 'Comcast', 'Warner Bros. Discovery', 'Paramount Global']\n  };\n  const match = Object.keys(defaults).find((k) => key.includes(k)) || 'technology';\n  return defaults[match];\n}\n\nfunction parsePeerList(raw) {\n  if (!raw) return [];\n  if (Array.isArray(raw)) return raw;\n  return String(raw).split(/[,;\\n|]/).map((s) => s.trim()).filter(Boolean);\n}\n\nfunction claudeBaseSystem(inputs, expert) {\n  return `You are an AI financial analyst who thinks like Aswath Damodaran. Evidence first. Every figure must come from the provided JSON only. Never fabricate numbers. If data is missing, write N/A and explain why. Show formulas for computed metrics. Do not use templating placeholders or curly-brace variables. Industry lens: ${expert?.name || inputs.expert_pref || 'industry expert'}. Executive audience: ${inputs.exec_type || 'executive'}. Service provider: ${inputs.service_provider || 'MY COMPANY'}.`;\n}\n\nfunction parseClaudeJson(response) {\n  const content = response?.content || [];\n  const text = content.map((p) => p.text || '').join('\\n').trim() || JSON.stringify(response);\n  try { return JSON.parse(text); } catch (e) {}\n  const match = text.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { return JSON.parse(match[0]); } catch (e) {} }\n  return { _raw: text };\n}\n\nconst state = items[0]?.json?.state || items[0]?.json || {};\nconst inputs = state.inputs || {};\nconst expert = inputs.expert_resolved || { name: inputs.expert_pref || 'industry expert' };\nconst dataPack = { entity: state.entity, inputs, normalized: state.normalized, research: state.research, peer_benchmarks: state.peer_benchmarks, financial_snapshot: state.financial_snapshot, ratio_dashboard: state.ratio_dashboard, event_research: state.event_research, data_freshness: state.data_freshness };\nconst system = claudeBaseSystem(inputs, expert);\nreturn [{ json: {\n  state,\n  claude_payloads: {\n    s4: {\n      model: 'claude-sonnet-4-6',\n      max_tokens: 3500,\n      temperature: 0.45,\n      system,\n      messages: [{ role: 'user', content: `Produce valid JSON only with key section_4_insights_markdown. Write exactly three strategic insights using SEC-backed metrics and peer_benchmarks table. Each insight must include Damodaran take, expert take, and so-what.\\n\\nINPUT_JSON:\\n${JSON.stringify(dataPack).slice(0, 100000)}` }],\n    },\n    s7: {\n      model: 'claude-sonnet-4-6',\n      max_tokens: 2500,\n      temperature: 0.3,\n      system,\n      messages: [{ role: 'user', content: `Produce valid JSON only with key section_7_rtbl_markdown. Read between the lines using filings, event_research, and metric changes. Use only supported evidence.\\n\\nINPUT_JSON:\\n${JSON.stringify(dataPack).slice(0, 100000)}` }],\n    },\n  },\n} }];\n"
+      }
+    },
+    {
+      "id": "claude_s4",
+      "name": "Claude Section 4 Insights",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        520,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.claude_payloads.s4) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "higk8M4c3hFtCG0D",
+          "name": "DFA Claude API Key"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "claude_s7",
+      "name": "Claude Section 7 RTBL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        780,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Prepare Claude Analysis Payloads').first().json.claude_payloads.s7) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "higk8M4c3hFtCG0D",
+          "name": "DFA Claude API Key"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "parse",
+      "name": "Parse Claude Analysis Sections",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Shared DFA financial utilities (inlined into n8n Code nodes)\nconst SEC_UA = 'DamodaranAnalystSystem/2.0 contact@goevolo.com';\n\nfunction normName(v) {\n  return String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');\n}\n\nfunction tagRows(facts, tags) {\n  for (const tag of tags) {\n    const fact = facts[tag];\n    if (!fact?.units) continue;\n    const rows = Object.values(fact.units).flat().filter((r) => r && r.val !== undefined);\n    if (rows.length) return { tag, rows };\n  }\n  return { tag: tags[0], rows: [] };\n}\n\nfunction latestAnnualRow(rows, fy) {\n  return rows\n    .filter((r) => r.form === '10-K' && Number(r.fy) === Number(fy))\n    .sort((a, b) => String(a.end || '').localeCompare(String(b.end || '')) || String(a.filed || '').localeCompare(String(b.filed || '')))\n    .at(-1) || null;\n}\n\nfunction latestQuarterRows(rows) {\n  const qrows = rows.filter((r) => r.form === '10-Q' && r.fy && r.fp)\n    .sort((a, b) => String(a.end || '').localeCompare(String(b.end || '')) || String(a.filed || '').localeCompare(String(b.filed || '')));\n  const uniq = [];\n  for (const row of qrows) {\n    const key = `${row.fy}-${row.fp}`;\n    if (!uniq.some((p) => p.key === key)) uniq.push({ key, fy: row.fy, fp: row.fp, end: row.end, filed: row.filed });\n  }\n  return uniq;\n}\n\nfunction compactFacts(usGaapAll) {\n  const supported = [\n    'RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet',\n    'GrossProfit', 'OperatingIncomeLoss', 'NetIncomeLoss', 'ProfitLoss',\n    'NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations',\n    'PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets',\n    'LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent', 'LongTermDebtAndFinanceLeaseObligationsCurrent',\n    'AssetsCurrent', 'LiabilitiesCurrent', 'InterestExpenseNonOperating', 'InterestExpense',\n    'EarningsPerShareDiluted', 'DepreciationDepletionAndAmortization', 'DepreciationDepletionAndAmortizationExpense', 'DepreciationAndAmortization',\n    'StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest',\n    'Assets', 'Liabilities', 'CashAndCashEquivalentsAtCarryingValue', 'ShortTermBorrowings'\n  ];\n  const out = {};\n  for (const tag of supported) {\n    const fact = usGaapAll[tag];\n    if (!fact?.units) continue;\n    const units = {};\n    for (const [unitName, rows] of Object.entries(fact.units)) {\n      if (!Array.isArray(rows)) continue;\n      const compact = rows\n        .filter((r) => r && r.val !== undefined && ['10-K', '10-Q'].includes(r.form))\n        .sort((a, b) => String(a.filed || '').localeCompare(String(b.filed || '')) || String(a.end || '').localeCompare(String(b.end || '')))\n        .slice(-20)\n        .map((r) => ({ end: r.end, val: r.val, fy: r.fy, fp: r.fp, form: r.form, filed: r.filed, frame: r.frame }));\n      if (compact.length) units[unitName] = compact;\n    }\n    if (Object.keys(units).length) out[tag] = { label: fact.label, units };\n  }\n  return out;\n}\n\nfunction resolveCikFromDirectory(directory, companyName, ticker) {\n  const rows = Array.isArray(directory) ? directory : Object.values(directory || {});\n  const nameNorm = normName(companyName);\n  const tickerNorm = normName(ticker);\n  function score(row) {\n    const title = row.title || row.name || '';\n    const rowTicker = row.ticker || '';\n    const titleNorm = normName(title);\n    const rowTickerNorm = normName(rowTicker);\n    let points = 0;\n    if (tickerNorm && rowTickerNorm === tickerNorm) points += 120;\n    if (titleNorm === nameNorm) points += 100;\n    if (nameNorm && titleNorm.startsWith(nameNorm)) points += 70;\n    if (nameNorm && titleNorm.includes(nameNorm)) points += 45;\n    return points;\n  }\n  const ranked = rows\n    .filter((row) => row && (row.title || row.name) && (row.cik_str || row.cik))\n    .map((row) => ({ row, score: score(row) }))\n    .filter((e) => e.score > 0)\n    .sort((a, b) => b.score - a.score);\n  const best = ranked[0]?.row || null;\n  const rawCik = best?.cik_str || best?.cik || null;\n  const cik = rawCik ? String(rawCik).padStart(10, '0') : null;\n  return { best, cik, ranked };\n}\n\nfunction metricFromFacts(facts, metric, fy) {\n  const map = {\n    revenue: ['RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet'],\n    gross_profit: ['GrossProfit'],\n    operating_income: ['OperatingIncomeLoss'],\n    net_income: ['NetIncomeLoss', 'ProfitLoss'],\n    operating_cash_flow: ['NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations'],\n    capex: ['PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets'],\n    long_term_debt: ['LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent'],\n    current_assets: ['AssetsCurrent'],\n    current_liabilities: ['LiabilitiesCurrent'],\n    interest_expense: ['InterestExpenseNonOperating', 'InterestExpense'],\n    equity: ['StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest'],\n    assets: ['Assets'],\n    cash: ['CashAndCashEquivalentsAtCarryingValue'],\n    depreciation: ['DepreciationDepletionAndAmortization', 'DepreciationDepletionAndAmortizationExpense', 'DepreciationAndAmortization']\n  };\n  const found = tagRows(facts, map[metric] || [metric]);\n  const row = latestAnnualRow(found.rows, fy);\n  return row ? Number(row.val) : null;\n}\n\nfunction computeEntityMetrics(facts, sourceMeta) {\n  const years = [2025, 2024, 2023];\n  const latestFy = years.find((fy) => metricFromFacts(facts, 'revenue', fy) !== null) || years[1];\n  const revenue = metricFromFacts(facts, 'revenue', latestFy);\n  const gross = metricFromFacts(facts, 'gross_profit', latestFy);\n  const op = metricFromFacts(facts, 'operating_income', latestFy);\n  const net = metricFromFacts(facts, 'net_income', latestFy);\n  const ocf = metricFromFacts(facts, 'operating_cash_flow', latestFy);\n  const capex = metricFromFacts(facts, 'capex', latestFy);\n  const ca = metricFromFacts(facts, 'current_assets', latestFy);\n  const cl = metricFromFacts(facts, 'current_liabilities', latestFy);\n  const interest = metricFromFacts(facts, 'interest_expense', latestFy);\n  const debt = metricFromFacts(facts, 'long_term_debt', latestFy);\n  const equity = metricFromFacts(facts, 'equity', latestFy);\n  const assets = metricFromFacts(facts, 'assets', latestFy);\n  const cash = metricFromFacts(facts, 'cash', latestFy);\n  const dep = metricFromFacts(facts, 'depreciation', latestFy);\n  const revY1 = metricFromFacts(facts, 'revenue', latestFy - 1);\n  const revY3 = metricFromFacts(facts, 'revenue', latestFy - 3);\n  const fcf = ocf !== null && capex !== null ? ocf - capex : null;\n  const ebitda = op !== null && dep !== null ? op + dep : null;\n  const safeDiv = (a, b) => (a !== null && b !== null && b !== 0 ? a / b : null);\n  return {\n    period: `FY${latestFy}`,\n    revenue,\n    gross_margin: safeDiv(gross, revenue),\n    operating_margin: safeDiv(op, revenue),\n    net_margin: safeDiv(net, revenue),\n    ebitda_margin: safeDiv(ebitda, revenue),\n    fcf_margin: safeDiv(fcf, revenue),\n    current_ratio: safeDiv(ca, cl),\n    debt_to_equity: safeDiv(debt, equity),\n    interest_coverage: safeDiv(op, interest),\n    roce: safeDiv(op, assets && cl !== null ? assets - cl : null),\n    asset_turnover: safeDiv(revenue, assets),\n    yoy_revenue_growth: safeDiv(revenue && revY1 ? revenue - revY1 : null, revY1),\n    revenue_cagr_3y: revY3 && revenue && revY3 > 0 ? Math.pow(revenue / revY3, 1 / 3) - 1 : null,\n    net_debt_ebitda: ebitda && debt !== null && cash !== null && ebitda !== 0 ? (debt - cash) / ebitda : null,\n    source_meta: sourceMeta\n  };\n}\n\nfunction fmtMetric(v, asPct = false) {\n  if (v === null || v === undefined || Number.isNaN(v)) return 'N/A';\n  if (asPct) return `${(v * 100).toFixed(1)}%`;\n  if (Math.abs(v) >= 1e9) return `${(v / 1e9).toFixed(2)}B USD`;\n  if (Math.abs(v) >= 1e6) return `${(v / 1e6).toFixed(1)}M USD`;\n  return `${Number(v).toLocaleString('en-US')} USD`;\n}\n\nfunction peerDefaults(industry) {\n  const key = String(industry || '').toLowerCase();\n  const defaults = {\n    technology: ['Microsoft', 'Alphabet', 'Meta Platforms', 'Amazon', 'NVIDIA'],\n    saas: ['Salesforce', 'Adobe', 'ServiceNow', 'Atlassian', 'Workday'],\n    retail: ['Walmart', 'Costco', 'Target', 'Amazon', 'Home Depot'],\n    banking: ['JPMorgan Chase', 'Bank of America', 'Wells Fargo', 'Citigroup', 'Goldman Sachs'],\n    healthcare: ['UnitedHealth Group', 'HCA Healthcare', 'Elevance Health', 'CVS Health', 'Humana'],\n    manufacturing: ['General Electric', 'Honeywell', 'Caterpillar', '3M', 'Siemens'],\n    gaming: ['Electronic Arts', 'Take-Two Interactive', 'Roblox', 'Nintendo', 'Sony'],\n    media: ['Disney', 'Netflix', 'Comcast', 'Warner Bros. Discovery', 'Paramount Global']\n  };\n  const match = Object.keys(defaults).find((k) => key.includes(k)) || 'technology';\n  return defaults[match];\n}\n\nfunction parsePeerList(raw) {\n  if (!raw) return [];\n  if (Array.isArray(raw)) return raw;\n  return String(raw).split(/[,;\\n|]/).map((s) => s.trim()).filter(Boolean);\n}\n\nfunction claudeBaseSystem(inputs, expert) {\n  return `You are an AI financial analyst who thinks like Aswath Damodaran. Evidence first. Every figure must come from the provided JSON only. Never fabricate numbers. If data is missing, write N/A and explain why. Show formulas for computed metrics. Do not use templating placeholders or curly-brace variables. Industry lens: ${expert?.name || inputs.expert_pref || 'industry expert'}. Executive audience: ${inputs.exec_type || 'executive'}. Service provider: ${inputs.service_provider || 'MY COMPANY'}.`;\n}\n\nfunction parseClaudeJson(response) {\n  const content = response?.content || [];\n  const text = content.map((p) => p.text || '').join('\\n').trim() || JSON.stringify(response);\n  try { return JSON.parse(text); } catch (e) {}\n  const match = text.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { return JSON.parse(match[0]); } catch (e) {} }\n  return { _raw: text };\n}\n\nconst prep = $('Prepare Claude Analysis Payloads').first().json;\nconst state = prep.state;\nstate.sections = state.sections || {};\nconst now = new Date().toISOString();\nfunction textFrom(nodeName) {\n  const json = $(nodeName).first().json || {};\n  const content = json.content || [];\n  return content.map((p) => p.text || '').join('\\n').trim() || JSON.stringify(json);\n}\nconst s4 = parseClaudeJson(textFrom('Claude Section 4 Insights'));\nconst s7 = parseClaudeJson(textFrom('Claude Section 7 RTBL'));\nif (state.peer_benchmarks?.markdown) state.sections.s3_benchmarks = state.peer_benchmarks.markdown;\nif (state.ratio_dashboard?.markdown) state.sections.s5_ratios = state.ratio_dashboard.markdown;\nstate.sections.s4_insights = s4.section_4_insights_markdown || state.sections.s4_insights || '## Section 4: Three Strategic Insights\\n\\nN/A - Claude output unavailable.';\nstate.sections.s7_rtbl = s7.section_7_rtbl_markdown || state.event_research?.markdown || state.sections.s7_rtbl || '## Section 7: Read Between The Lines\\n\\nN/A - Claude output unavailable.';\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_ANALYZE', status: 'OK', message: 'Analysis sections 4 and 7 generated; sections 3 and 5 sourced from deterministic agents.' });\nreturn [{ json: state }];\n"
+      }
+    }
+  ],
+  "connections": {
+    "Subworkflow Input": {
+      "main": [
+        [
+          {
+            "node": "Prepare Claude Analysis Payloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Claude Analysis Payloads": {
+      "main": [
+        [
+          {
+            "node": "Claude Section 4 Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Section 4 Insights": {
+      "main": [
+        [
+          {
+            "node": "Claude Section 7 RTBL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Section 7 RTBL": {
+      "main": [
+        [
+          {
+            "node": "Parse Claude Analysis Sections",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Karachi",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "executionTimeout": 900,
+    "saveExecutionProgress": false
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "7d11a451-dca4-4548-a8ab-f9f7dac4cf32",
+  "activeVersionId": "7d11a451-dca4-4548-a8ab-f9f7dac4cf32",
+  "versionCounter": 9,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-24T10:33:30.411Z",
+      "createdAt": "2026-06-24T10:33:30.411Z",
+      "role": "workflow:owner",
+      "workflowId": "RLp9AMthAvTC0iBC",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-06-24T11:25:52.602Z",
+      "createdAt": "2026-06-24T11:25:52.602Z",
+      "id": "PvqNmKlzG0X72TtP",
+      "name": "DFA Analyst System"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-06-26T17:12:08.863Z",
+    "createdAt": "2026-06-26T17:12:08.863Z",
+    "versionId": "7d11a451-dca4-4548-a8ab-f9f7dac4cf32",
+    "workflowId": "RLp9AMthAvTC0iBC",
+    "nodes": [
+      {
+        "id": "trigger",
+        "name": "Subworkflow Input",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "inputSource": "passthrough"
+        }
+      },
+      {
+        "id": "logic",
+        "name": "Prepare Claude Analysis Payloads",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          260,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst normalized = state.normalized || {};\nconst research = state.research || {};\nconst entity = state.entity || {};\nconst inputs = state.inputs || {};\nconst expert = inputs.expert_resolved || { name: inputs.expert_pref || 'selected industry expert', reason: 'Founder or industry config selection' };\nconst baseSystem = `You are an AI financial analyst who thinks like Aswath Damodaran. Evidence first. Every figure must come from the provided JSON only. Never fabricate numbers. If data is missing, write N/A and explain why. Show formulas for computed metrics. Distinguish facts from interpretation. Industry lens: ${expert.name}. Executive audience: ${inputs.exec_type || 'executive'}.`;\nconst dataPack = { entity, inputs, normalized, research };\nfunction messages(task) {\n  return [{ role: 'user', content: `${task}\\n\\nINPUT_JSON:\\n${JSON.stringify(dataPack).slice(0, 120000)}` }];\n}\nstate.analysis_jobs = [\n  { section_id: 's3_s4', status: 'prepared' },\n  { section_id: 's5_ratios', status: 'prepared' },\n  { section_id: 's7_rtbl', status: 'prepared' }\n];\nreturn [{ json: {\n  state,\n  claude_payloads: {\n    s3_s4: {\n      model: 'claude-sonnet-4-6',\n      max_tokens: 5000,\n      temperature: 0.5,\n      system: baseSystem,\n      messages: messages(`Produce valid JSON only with keys section_3_benchmarks_markdown and section_4_insights_markdown. Section 3: peer comparison and benchmarking using available peer jobs/defaults and normalized data. Section 4: exactly three strategic insights. Each insight must include Damodaran take, expert take, and so-what. If peer metrics are pending, say N/A and explain credential/source dependency.`)\n    },\n    s5: {\n      model: 'claude-sonnet-4-6',\n      max_tokens: 4000,\n      temperature: 0.3,\n      system: baseSystem,\n      messages: messages(`Produce valid JSON only with key section_5_ratio_dashboard_markdown. Build ratio dashboard from normalized metrics. Include formulas, input line items, latest values, trend direction where periods exist, and driver explanation. Use N/A for missing ratios.`)\n    },\n    s7: {\n      model: 'claude-sonnet-4-6',\n      max_tokens: 3500,\n      temperature: 0.3,\n      system: baseSystem,\n      messages: messages(`Produce valid JSON only with key section_7_rtbl_markdown. Read between the lines using recent filings, research events, gaps, and metric changes. Cover restructuring, M&A, leadership, segment changes, litigation, and accounting changes only when supported. If unsupported, say so.`)\n    }\n  }\n} }];"
+        }
+      },
+      {
+        "id": "claude_s3_s4",
+        "name": "Claude Sections 3 And 4",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          520,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.anthropic.com/v1/messages",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "anthropic-version",
+                "value": "2023-06-01"
+              },
+              {
+                "name": "content-type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.claude_payloads.s3_s4) }}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "higk8M4c3hFtCG0D",
+            "name": "DFA Claude API Key"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1500,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "claude_s5",
+        "name": "Claude Section 5 Ratios",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          780,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.anthropic.com/v1/messages",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "anthropic-version",
+                "value": "2023-06-01"
+              },
+              {
+                "name": "content-type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($('Prepare Claude Analysis Payloads').first().json.claude_payloads.s5) }}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "higk8M4c3hFtCG0D",
+            "name": "DFA Claude API Key"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1500,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "claude_s7",
+        "name": "Claude Section 7 RTBL",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          1040,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.anthropic.com/v1/messages",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "anthropic-version",
+                "value": "2023-06-01"
+              },
+              {
+                "name": "content-type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($('Prepare Claude Analysis Payloads').first().json.claude_payloads.s7) }}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "higk8M4c3hFtCG0D",
+            "name": "DFA Claude API Key"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1500,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "parse_analysis",
+        "name": "Parse Claude Analysis Sections",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1300,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const prep = $('Prepare Claude Analysis Payloads').first().json;\nconst state = prep.state;\nstate.sections = state.sections || {};\nstate.audit_log = state.audit_log || [];\nconst now = new Date().toISOString();\nfunction textFrom(nodeName) {\n  const json = $(nodeName).first().json || {};\n  if (json.error || json.message?.includes?.('error')) return JSON.stringify(json);\n  const content = json.content || [];\n  return content.map((part) => part.text || '').join('\\n').trim() || JSON.stringify(json);\n}\nfunction parseJsonish(text) {\n  try { return JSON.parse(text); } catch (e) {}\n  const match = text.match(/\\{[\\s\\S]*\\}/);\n  if (match) {\n    try { return JSON.parse(match[0]); } catch (e) {}\n  }\n  return { _raw: text };\n}\nconst s34 = parseJsonish(textFrom('Claude Sections 3 And 4'));\nconst s5 = parseJsonish(textFrom('Claude Section 5 Ratios'));\nconst s7 = parseJsonish(textFrom('Claude Section 7 RTBL'));\nstate.sections.s3_benchmarks = state.sections.s3_benchmarks || s34.section_3_benchmarks_markdown || `## Section 3: Peer Comparison & Benchmarking\\n\\n${s34._raw || 'N/A - Claude output could not be parsed.'}`;\nstate.sections.s4_insights = s34.section_4_insights_markdown || '## Section 4: Three Strategic Insights\\n\\nN/A - Claude output could not be parsed.';\nstate.sections.s5_ratios = state.sections.s5_ratios || s5.section_5_ratio_dashboard_markdown || `## Section 5: Ratio Dashboard\\n\\n${s5._raw || 'N/A - Claude output could not be parsed.'}`;\nstate.sections.s7_rtbl = state.sections.s7_rtbl || s7.section_7_rtbl_markdown || `## Section 7: Read Between The Lines\\n\\n${s7._raw || 'N/A - Claude output could not be parsed.'}`;\nstate.section_outputs = state.section_outputs || {};\nfor (const id of ['s3_benchmarks', 's4_insights', 's5_ratios', 's7_rtbl']) {\n  state.section_outputs[id] = {\n    section_id: id,\n    markdown: typeof state.sections[id] === 'string' ? state.sections[id] : JSON.stringify(state.sections[id], null, 2),\n    used_sources: state.normalized?.source_coverage?.sources_used || [],\n    missing_inputs: state.normalized?.gaps || [],\n    validation_status: String(state.sections[id] || '').includes('N/A - Claude output could not be parsed') ? 'WARN' : 'PASS',\n    confidence: state.normalized?.reliability_map?.public_company_xbrl === 'HIGH' ? 'HIGH' : 'MEDIUM',\n    warnings: []\n  };\n}\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_ANALYZE', status: 'OK', message: 'Claude analysis sections generated and parsed.' });\nreturn [{ json: state }];"
+        }
+      }
+    ],
+    "connections": {
+      "Subworkflow Input": {
+        "main": [
+          [
+            {
+              "node": "Prepare Claude Analysis Payloads",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare Claude Analysis Payloads": {
+        "main": [
+          [
+            {
+              "node": "Claude Sections 3 And 4",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Claude Sections 3 And 4": {
+        "main": [
+          [
+            {
+              "node": "Claude Section 5 Ratios",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Claude Section 5 Ratios": {
+        "main": [
+          [
+            {
+              "node": "Claude Section 7 RTBL",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Claude Section 7 RTBL": {
+        "main": [
+          [
+            {
+              "node": "Parse Claude Analysis Sections",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Abdullah  Dilshad",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-26T17:12:09.118Z",
+        "id": 268,
+        "workflowId": "RLp9AMthAvTC0iBC",
+        "versionId": "7d11a451-dca4-4548-a8ab-f9f7dac4cf32",
+        "event": "activated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      },
+      {
+        "createdAt": "2026-06-26T17:12:09.080Z",
+        "id": 267,
+        "workflowId": "RLp9AMthAvTC0iBC",
+        "versionId": "7d11a451-dca4-4548-a8ab-f9f7dac4cf32",
+        "event": "deactivated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    ]
+  }
+}

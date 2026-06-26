@@ -1,0 +1,635 @@
+{
+  "updatedAt": "2026-06-26T17:11:57.587Z",
+  "createdAt": "2026-06-24T10:33:23.991Z",
+  "id": "vgS7dQ1OeCpHpXrU",
+  "name": "DFA - WF_RESEARCH_PUBLIC",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Subworkflow Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "logic",
+      "name": "Prepare SEC Research URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nconst cik = state.entity?.cik;\nconst ticker = state.entity?.ticker;\nstate.research = state.research || { financials: {}, peers: [], news_events: [], market_data: {} };\nstate.audit_log = state.audit_log || [];\nif (!cik) {\n  state.audit_log.push({ timestamp: now, workflow_name: 'WF_RESEARCH_PUBLIC', status: 'WARN', message: 'No CIK available; SEC public research cannot run.' });\n}\nreturn [{\n  json: {\n    state,\n    cik,\n    ticker,\n    urls: {\n      sec_submissions: cik ? `https://data.sec.gov/submissions/CIK${cik}.json` : null,\n      sec_company_facts: cik ? `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json` : null\n    },\n    source_tags: {\n      submissions: 'SEC EDGAR Submissions API',\n      company_facts: 'SEC EDGAR Company Facts XBRL'\n    }\n  }\n}];"
+      }
+    },
+    {
+      "id": "sec_submissions",
+      "name": "Fetch SEC Submissions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        520,
+        -120
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.urls.sec_submissions || 'https://www.sec.gov/files/company_tickers.json' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "DamodaranAnalystSystem/1.0 contact-configured-in-n8n"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "sec_company_facts",
+      "name": "Fetch SEC Company Facts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        780,
+        -120
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Prepare SEC Research URLs').first().json.urls.sec_company_facts || 'https://www.sec.gov/files/company_tickers.json' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "DamodaranAnalystSystem/1.0 contact-configured-in-n8n"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "public_bundle",
+      "name": "Build Public Research Bundle",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -120
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const prep = $('Prepare SEC Research URLs').first().json;\nconst submissions = $('Fetch SEC Submissions').first().json || {};\nconst facts = $('Fetch SEC Company Facts').first().json || {};\nconst state = prep.state;\nconst now = new Date().toISOString();\nconst recentFilings = (submissions.filings?.recent?.form || []).map((form, index) => ({\n  form,\n  filing_date: submissions.filings.recent.filingDate?.[index] || null,\n  accession_number: submissions.filings.recent.accessionNumber?.[index] || null,\n  report_date: submissions.filings.recent.reportDate?.[index] || null,\n  primary_document: submissions.filings.recent.primaryDocument?.[index] || null,\n  source_name: 'SEC EDGAR Submissions API',\n  source_url: prep.urls.sec_submissions,\n  source_date: now,\n  confidence: 'HIGH'\n})).filter((filing) => ['10-K', '10-Q', '8-K'].includes(filing.form)).slice(0, 40);\nconst usGaapAll = facts?.facts?.['us-gaap'] || {};\nconst supportedFactTags = [\n  'RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet',\n  'GrossProfit', 'OperatingIncomeLoss', 'NetIncomeLoss', 'ProfitLoss',\n  'NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations',\n  'PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets',\n  'LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent', 'LongTermDebtAndFinanceLeaseObligationsCurrent',\n  'AssetsCurrent', 'LiabilitiesCurrent', 'InterestExpenseNonOperating', 'InterestExpense',\n  'EarningsPerShareDiluted', 'WeightedAverageNumberOfDilutedSharesOutstanding', 'WeightedAverageNumberOfSharesOutstandingDiluted',\n  'DepreciationDepletionAndAmortization', 'DepreciationDepletionAndAmortizationExpense', 'DepreciationAndAmortization',\n  'StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest',\n  'Assets', 'Liabilities', 'CashAndCashEquivalentsAtCarryingValue', 'ShortTermBorrowings'\n];\nfunction compactFact(fact) {\n  const compactUnits = {};\n  for (const [unitName, rows] of Object.entries(fact.units || {})) {\n    if (!Array.isArray(rows)) continue;\n    const compactRows = rows\n      .filter((row) => row && row.val !== undefined && ['10-K', '10-Q'].includes(row.form))\n      .sort((a, b) => String(a.end || '').localeCompare(String(b.end || '')) || String(a.filed || '').localeCompare(String(b.filed || '')))\n      .slice(-16)\n      .map((row) => ({ end: row.end, val: row.val, fy: row.fy, fp: row.fp, form: row.form, filed: row.filed, frame: row.frame }));\n    if (compactRows.length) compactUnits[unitName] = compactRows;\n  }\n  return { label: fact.label, description: fact.description, units: compactUnits };\n}\nconst usGaapCompact = Object.fromEntries(supportedFactTags.filter((tag) => usGaapAll[tag]).map((tag) => [tag, compactFact(usGaapAll[tag])]).filter(([, fact]) => Object.keys(fact.units || {}).length));\nconst secFactsAvailable = Boolean(Object.keys(usGaapCompact).length);\nstate.entity = state.entity || {};\nstate.entity.fiscal_year_end = state.entity.fiscal_year_end || submissions.fiscalYearEnd || null;\nstate.entity.exchange = state.entity.exchange || submissions.exchanges?.[0] || null;\nstate.entity.ticker = state.entity.ticker || submissions.tickers?.[0] || prep.ticker || null;\nstate.entity.reporting_currency = state.entity.reporting_currency || 'USD';\nstate.research = state.research || {};\nstate.research.financials = {\n  source_name: 'SEC EDGAR Company Facts XBRL',\n  source_url: prep.urls.sec_company_facts,\n  source_date: now,\n  confidence: secFactsAvailable ? 'HIGH' : 'LOW',\n  raw_us_gaap_facts: usGaapCompact,\n  available_taxonomies: Object.keys(facts?.facts || {})\n};\nstate.research.filings = {\n  source_name: 'SEC EDGAR Submissions API',\n  source_url: prep.urls.sec_submissions,\n  source_date: now,\n  confidence: recentFilings.length ? 'HIGH' : 'LOW',\n  recent_filings: recentFilings\n};\nstate.research.peer_jobs = {\n  status: 'public_sources_only',\n  primary_logic: 'Use founder override peers first; otherwise use DFA_Peer_Defaults/Claude peer selector. Pull peer financials from SEC EDGAR for US public peers. Do not require paid peer APIs.',\n  target_metrics: ['revenue_growth_yoy', 'gross_margin', 'op_margin', 'fcf_margin', 'debt_to_equity', 'roic_when_inputs_exist'],\n  confidence: 'PENDING_PEER_SEC_FETCH'\n};\nstate.research.market_data_jobs = {\n  status: 'free_public_sources_only',\n  providers: ['SEC share counts', 'company IR pages', 'public market pages discovered via Serper/founder URLs'],\n  requested_fields: ['shares_outstanding_from_SEC', 'market_price_if_public_source_available', 'market_cap_computed_if_price_and_shares_available'],\n  rule: 'If public market price source is unavailable, market cap is N/A. Do not use paid market data APIs.',\n  confidence: 'PENDING_PUBLIC_SOURCE'\n};\nstate.research.news_event_jobs = {\n  status: 'credential_required',\n  providers: ['SEC recent filings', 'Serper'],\n  sec_recent_filings_available: recentFilings.length,\n  serper_queries: [\n    `${state.entity?.legal_name || state.inputs?.company_name} earnings transcript 2024 2025`,\n    `${state.entity?.legal_name || state.inputs?.company_name} restructuring acquisition CEO CFO 2024 2025`,\n    `${state.entity?.legal_name || state.inputs?.company_name} investor relations press release 2025`\n  ],\n  confidence: recentFilings.length ? 'MEDIUM' : 'LOW'\n};\nstate.research.source_status = {\n  sec_submissions: recentFilings.length ? 'OK' : 'EMPTY_OR_FAILED',\n  sec_company_facts: secFactsAvailable ? 'OK' : 'EMPTY_OR_FAILED',\n  fmp: 'DISABLED_NO_PAID_APIS',\n  polygon: 'DISABLED_NO_PAID_APIS',\n  alpha_vantage: 'DISABLED_NO_PAID_APIS',\n  serper: 'OPTIONAL_DISCOVERY_HELPER',\n  company_ir_pages: 'PUBLIC_SOURCE_PRIORITY',\n  sec_filing_html: 'PUBLIC_SOURCE_FALLBACK'\n};\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_RESEARCH_PUBLIC', status: secFactsAvailable ? 'OK' : 'WARN', message: secFactsAvailable ? 'SEC public research bundle built.' : 'SEC company facts unavailable; fallback provider required.' });\nreturn [{ json: state }];"
+      }
+    },
+    {
+      "id": "serper_public_news",
+      "name": "Serper Public News Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1300,
+        -120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://google.serper.dev/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ q: ($json.research.news_event_jobs.serper_queries || []).join(' OR '), num: 10 }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "2JT19Mz8usFvinDy",
+          "name": "DFA Serper API Key"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "attach_serper_public",
+      "name": "Attach Public Serper Events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        -120
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Shared DFA financial utilities (inlined into n8n Code nodes)\nconst SEC_UA = 'DamodaranAnalystSystem/2.0 contact@goevolo.com';\n\nfunction normName(v) {\n  return String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');\n}\n\nfunction tagRows(facts, tags) {\n  for (const tag of tags) {\n    const fact = facts[tag];\n    if (!fact?.units) continue;\n    const rows = Object.values(fact.units).flat().filter((r) => r && r.val !== undefined);\n    if (rows.length) return { tag, rows };\n  }\n  return { tag: tags[0], rows: [] };\n}\n\nfunction latestAnnualRow(rows, fy) {\n  return rows\n    .filter((r) => r.form === '10-K' && Number(r.fy) === Number(fy))\n    .sort((a, b) => String(a.end || '').localeCompare(String(b.end || '')) || String(a.filed || '').localeCompare(String(b.filed || '')))\n    .at(-1) || null;\n}\n\nfunction latestQuarterRows(rows) {\n  const qrows = rows.filter((r) => r.form === '10-Q' && r.fy && r.fp)\n    .sort((a, b) => String(a.end || '').localeCompare(String(b.end || '')) || String(a.filed || '').localeCompare(String(b.filed || '')));\n  const uniq = [];\n  for (const row of qrows) {\n    const key = `${row.fy}-${row.fp}`;\n    if (!uniq.some((p) => p.key === key)) uniq.push({ key, fy: row.fy, fp: row.fp, end: row.end, filed: row.filed });\n  }\n  return uniq;\n}\n\nfunction compactFacts(usGaapAll) {\n  const supported = [\n    'RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet',\n    'GrossProfit', 'OperatingIncomeLoss', 'NetIncomeLoss', 'ProfitLoss',\n    'NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations',\n    'PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets',\n    'LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent', 'LongTermDebtAndFinanceLeaseObligationsCurrent',\n    'AssetsCurrent', 'LiabilitiesCurrent', 'InterestExpenseNonOperating', 'InterestExpense',\n    'EarningsPerShareDiluted', 'DepreciationDepletionAndAmortization', 'DepreciationDepletionAndAmortizationExpense', 'DepreciationAndAmortization',\n    'StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest',\n    'Assets', 'Liabilities', 'CashAndCashEquivalentsAtCarryingValue', 'ShortTermBorrowings'\n  ];\n  const out = {};\n  for (const tag of supported) {\n    const fact = usGaapAll[tag];\n    if (!fact?.units) continue;\n    const units = {};\n    for (const [unitName, rows] of Object.entries(fact.units)) {\n      if (!Array.isArray(rows)) continue;\n      const compact = rows\n        .filter((r) => r && r.val !== undefined && ['10-K', '10-Q'].includes(r.form))\n        .sort((a, b) => String(a.filed || '').localeCompare(String(b.filed || '')) || String(a.end || '').localeCompare(String(b.end || '')))\n        .slice(-20)\n        .map((r) => ({ end: r.end, val: r.val, fy: r.fy, fp: r.fp, form: r.form, filed: r.filed, frame: r.frame }));\n      if (compact.length) units[unitName] = compact;\n    }\n    if (Object.keys(units).length) out[tag] = { label: fact.label, units };\n  }\n  return out;\n}\n\nfunction resolveCikFromDirectory(directory, companyName, ticker) {\n  const rows = Array.isArray(directory) ? directory : Object.values(directory || {});\n  const nameNorm = normName(companyName);\n  const tickerNorm = normName(ticker);\n  function score(row) {\n    const title = row.title || row.name || '';\n    const rowTicker = row.ticker || '';\n    const titleNorm = normName(title);\n    const rowTickerNorm = normName(rowTicker);\n    let points = 0;\n    if (tickerNorm && rowTickerNorm === tickerNorm) points += 120;\n    if (titleNorm === nameNorm) points += 100;\n    if (nameNorm && titleNorm.startsWith(nameNorm)) points += 70;\n    if (nameNorm && titleNorm.includes(nameNorm)) points += 45;\n    return points;\n  }\n  const ranked = rows\n    .filter((row) => row && (row.title || row.name) && (row.cik_str || row.cik))\n    .map((row) => ({ row, score: score(row) }))\n    .filter((e) => e.score > 0)\n    .sort((a, b) => b.score - a.score);\n  const best = ranked[0]?.row || null;\n  const rawCik = best?.cik_str || best?.cik || null;\n  const cik = rawCik ? String(rawCik).padStart(10, '0') : null;\n  return { best, cik, ranked };\n}\n\nfunction metricFromFacts(facts, metric, fy) {\n  const map = {\n    revenue: ['RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet'],\n    gross_profit: ['GrossProfit'],\n    operating_income: ['OperatingIncomeLoss'],\n    net_income: ['NetIncomeLoss', 'ProfitLoss'],\n    operating_cash_flow: ['NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations'],\n    capex: ['PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets'],\n    long_term_debt: ['LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent'],\n    current_assets: ['AssetsCurrent'],\n    current_liabilities: ['LiabilitiesCurrent'],\n    interest_expense: ['InterestExpenseNonOperating', 'InterestExpense'],\n    equity: ['StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest'],\n    assets: ['Assets'],\n    cash: ['CashAndCashEquivalentsAtCarryingValue'],\n    depreciation: ['DepreciationDepletionAndAmortization', 'DepreciationDepletionAndAmortizationExpense', 'DepreciationAndAmortization']\n  };\n  const found = tagRows(facts, map[metric] || [metric]);\n  const row = latestAnnualRow(found.rows, fy);\n  return row ? Number(row.val) : null;\n}\n\nfunction computeEntityMetrics(facts, sourceMeta) {\n  const years = [2025, 2024, 2023];\n  const latestFy = years.find((fy) => metricFromFacts(facts, 'revenue', fy) !== null) || years[1];\n  const revenue = metricFromFacts(facts, 'revenue', latestFy);\n  const gross = metricFromFacts(facts, 'gross_profit', latestFy);\n  const op = metricFromFacts(facts, 'operating_income', latestFy);\n  const net = metricFromFacts(facts, 'net_income', latestFy);\n  const ocf = metricFromFacts(facts, 'operating_cash_flow', latestFy);\n  const capex = metricFromFacts(facts, 'capex', latestFy);\n  const ca = metricFromFacts(facts, 'current_assets', latestFy);\n  const cl = metricFromFacts(facts, 'current_liabilities', latestFy);\n  const interest = metricFromFacts(facts, 'interest_expense', latestFy);\n  const debt = metricFromFacts(facts, 'long_term_debt', latestFy);\n  const equity = metricFromFacts(facts, 'equity', latestFy);\n  const assets = metricFromFacts(facts, 'assets', latestFy);\n  const cash = metricFromFacts(facts, 'cash', latestFy);\n  const dep = metricFromFacts(facts, 'depreciation', latestFy);\n  const revY1 = metricFromFacts(facts, 'revenue', latestFy - 1);\n  const revY3 = metricFromFacts(facts, 'revenue', latestFy - 3);\n  const fcf = ocf !== null && capex !== null ? ocf - capex : null;\n  const ebitda = op !== null && dep !== null ? op + dep : null;\n  const safeDiv = (a, b) => (a !== null && b !== null && b !== 0 ? a / b : null);\n  return {\n    period: `FY${latestFy}`,\n    revenue,\n    gross_margin: safeDiv(gross, revenue),\n    operating_margin: safeDiv(op, revenue),\n    net_margin: safeDiv(net, revenue),\n    ebitda_margin: safeDiv(ebitda, revenue),\n    fcf_margin: safeDiv(fcf, revenue),\n    current_ratio: safeDiv(ca, cl),\n    debt_to_equity: safeDiv(debt, equity),\n    interest_coverage: safeDiv(op, interest),\n    roce: safeDiv(op, assets && cl !== null ? assets - cl : null),\n    asset_turnover: safeDiv(revenue, assets),\n    yoy_revenue_growth: safeDiv(revenue && revY1 ? revenue - revY1 : null, revY1),\n    revenue_cagr_3y: revY3 && revenue && revY3 > 0 ? Math.pow(revenue / revY3, 1 / 3) - 1 : null,\n    net_debt_ebitda: ebitda && debt !== null && cash !== null && ebitda !== 0 ? (debt - cash) / ebitda : null,\n    source_meta: sourceMeta\n  };\n}\n\nfunction fmtMetric(v, asPct = false) {\n  if (v === null || v === undefined || Number.isNaN(v)) return 'N/A';\n  if (asPct) return `${(v * 100).toFixed(1)}%`;\n  if (Math.abs(v) >= 1e9) return `${(v / 1e9).toFixed(2)}B USD`;\n  if (Math.abs(v) >= 1e6) return `${(v / 1e6).toFixed(1)}M USD`;\n  return `${Number(v).toLocaleString('en-US')} USD`;\n}\n\nfunction peerDefaults(industry) {\n  const key = String(industry || '').toLowerCase();\n  const defaults = {\n    technology: ['Microsoft', 'Alphabet', 'Meta Platforms', 'Amazon', 'NVIDIA'],\n    saas: ['Salesforce', 'Adobe', 'ServiceNow', 'Atlassian', 'Workday'],\n    retail: ['Walmart', 'Costco', 'Target', 'Amazon', 'Home Depot'],\n    banking: ['JPMorgan Chase', 'Bank of America', 'Wells Fargo', 'Citigroup', 'Goldman Sachs'],\n    healthcare: ['UnitedHealth Group', 'HCA Healthcare', 'Elevance Health', 'CVS Health', 'Humana'],\n    manufacturing: ['General Electric', 'Honeywell', 'Caterpillar', '3M', 'Siemens'],\n    gaming: ['Electronic Arts', 'Take-Two Interactive', 'Roblox', 'Nintendo', 'Sony'],\n    media: ['Disney', 'Netflix', 'Comcast', 'Warner Bros. Discovery', 'Paramount Global']\n  };\n  const match = Object.keys(defaults).find((k) => key.includes(k)) || 'technology';\n  return defaults[match];\n}\n\nfunction parsePeerList(raw) {\n  if (!raw) return [];\n  if (Array.isArray(raw)) return raw;\n  return String(raw).split(/[,;\\n|]/).map((s) => s.trim()).filter(Boolean);\n}\n\nfunction claudeBaseSystem(inputs, expert) {\n  return `You are an AI financial analyst who thinks like Aswath Damodaran. Evidence first. Every figure must come from the provided JSON only. Never fabricate numbers. If data is missing, write N/A and explain why. Show formulas for computed metrics. Do not use templating placeholders or curly-brace variables. Industry lens: ${expert?.name || inputs.expert_pref || 'industry expert'}. Executive audience: ${inputs.exec_type || 'executive'}. Service provider: ${inputs.service_provider || 'MY COMPANY'}.`;\n}\n\nfunction parseClaudeJson(response) {\n  const content = response?.content || [];\n  const text = content.map((p) => p.text || '').join('\\n').trim() || JSON.stringify(response);\n  try { return JSON.parse(text); } catch (e) {}\n  const match = text.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { return JSON.parse(match[0]); } catch (e) {} }\n  return { _raw: text };\n}\n\nconst state = $('Build Public Research Bundle').first().json;\nconst serper = $('Serper Public News Search').first().json || {};\nconst marketRaw = $('Fetch Live Market Price').first().json || {};\nconst now = new Date().toISOString();\nconst organic = serper.organic || [];\nstate.research.news_events = organic.slice(0, 10).map((item) => ({\n  date: item.date || null,\n  type: 'web_search_signal',\n  title: item.title || '',\n  description: item.snippet || '',\n  source_url: item.link || '',\n  source_name: 'Serper Google Search',\n  source_date: now,\n  confidence: item.link ? 'MEDIUM' : 'LOW',\n  financial_impact_signal: 'Requires analyst interpretation; not assumed.',\n}));\n\nconst ticker = state.entity?.ticker || state.inputs?.ticker;\nlet marketCap = null;\nlet sharePrice = null;\nlet sharesOutstanding = null;\ntry {\n  const result = marketRaw?.chart?.result?.[0];\n  const meta = result?.meta || {};\n  sharePrice = meta.regularMarketPrice || meta.previousClose || null;\n  const asOf = meta.regularMarketTime ? new Date(meta.regularMarketTime * 1000).toISOString() : now;\n  const facts = state.research?.financials?.raw_us_gaap_facts || {};\n  const shareTags = ['WeightedAverageNumberOfDilutedSharesOutstanding', 'WeightedAverageNumberOfSharesOutstandingDiluted', 'CommonStockSharesOutstanding'];\n  const shareFound = tagRows(facts, shareTags);\n  const shareRow = shareFound.rows.filter((r) => r.form === '10-K' || r.form === '10-Q').sort((a, b) => String(a.filed || '').localeCompare(String(b.filed || ''))).at(-1);\n  sharesOutstanding = shareRow ? Number(shareRow.val) : null;\n  if (sharePrice && sharesOutstanding) {\n    marketCap = sharePrice * sharesOutstanding;\n  }\n  state.research.market_data = {\n    source_name: sharesOutstanding ? 'Yahoo Finance price x SEC diluted shares' : 'Yahoo Finance (price only)',\n    source_url: ticker ? `https://finance.yahoo.com/quote/${ticker}` : null,\n    source_date: asOf,\n    ticker,\n    share_price_usd: sharePrice,\n    shares_outstanding: sharesOutstanding,\n    shares_source: shareRow ? `SEC EDGAR:${shareFound.tag}` : null,\n    market_cap_usd: marketCap,\n    confidence: marketCap ? 'MEDIUM' : (sharePrice ? 'LOW' : 'N/A'),\n    fetched_at: now,\n  };\n  state.entity.market_cap_usd = marketCap;\n  state.entity.market_cap_as_of = asOf;\n} catch (e) {\n  state.research.market_data = { confidence: 'N/A', error: String(e.message || e), fetched_at: now };\n}\n\nconst filings = state.research?.filings?.recent_filings || [];\nconst latestFiling = filings[0] || null;\nstate.data_freshness = {\n  fetched_at: now,\n  latest_filing_form: latestFiling?.form || null,\n  latest_filing_date: latestFiling?.filing_date || null,\n  latest_report_date: latestFiling?.report_date || null,\n  sec_company_facts_url: state.research?.financials?.source_url || null,\n  market_price_as_of: state.research?.market_data?.source_date || null,\n  rule: 'All financial figures are pulled live from SEC EDGAR and public market sources at workflow execution time.',\n};\n\nstate.research.source_status = state.research.source_status || {};\nstate.research.source_status.serper = organic.length ? 'OK' : 'EMPTY_OR_FAILED';\nstate.research.source_status.market_data = state.research.market_data?.market_cap_usd ? 'OK' : (state.research.market_data?.share_price_usd ? 'PARTIAL' : 'N/A');\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_RESEARCH_PUBLIC', status: 'OK', message: `Public research finalized. Market cap: ${marketCap ? fmtMetric(marketCap) : 'N/A'}.` });\nreturn [{ json: state }];\n"
+      }
+    },
+    {
+      "id": "market_price",
+      "name": "Fetch Live Market Price",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1300,
+        -120
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent($json.entity?.ticker || $json.state?.entity?.ticker || $json.ticker || $('Prepare SEC Research URLs').first().json.ticker || 'AAPL') + '?interval=1d&range=1d' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "DamodaranAnalystSystem/2.0"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "alwaysOutputData": true
+    }
+  ],
+  "connections": {
+    "Subworkflow Input": {
+      "main": [
+        [
+          {
+            "node": "Prepare SEC Research URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare SEC Research URLs": {
+      "main": [
+        [
+          {
+            "node": "Fetch SEC Submissions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch SEC Submissions": {
+      "main": [
+        [
+          {
+            "node": "Fetch SEC Company Facts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch SEC Company Facts": {
+      "main": [
+        [
+          {
+            "node": "Build Public Research Bundle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Public Research Bundle": {
+      "main": [
+        [
+          {
+            "node": "Serper Public News Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Serper Public News Search": {
+      "main": [
+        [
+          {
+            "node": "Fetch Live Market Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Live Market Price": {
+      "main": [
+        [
+          {
+            "node": "Attach Public Serper Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Karachi",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "executionTimeout": 600,
+    "saveExecutionProgress": false
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "6fb70a54-88ed-4ec4-8bba-3c16189afe59",
+  "activeVersionId": "6fb70a54-88ed-4ec4-8bba-3c16189afe59",
+  "versionCounter": 9,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-24T10:33:23.992Z",
+      "createdAt": "2026-06-24T10:33:23.992Z",
+      "role": "workflow:owner",
+      "workflowId": "vgS7dQ1OeCpHpXrU",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-06-24T11:25:52.602Z",
+      "createdAt": "2026-06-24T11:25:52.602Z",
+      "id": "PvqNmKlzG0X72TtP",
+      "name": "DFA Analyst System"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-06-26T17:11:57.588Z",
+    "createdAt": "2026-06-26T17:11:57.588Z",
+    "versionId": "6fb70a54-88ed-4ec4-8bba-3c16189afe59",
+    "workflowId": "vgS7dQ1OeCpHpXrU",
+    "nodes": [
+      {
+        "id": "trigger",
+        "name": "Subworkflow Input",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "inputSource": "passthrough"
+        }
+      },
+      {
+        "id": "logic",
+        "name": "Prepare SEC Research URLs",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          260,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nconst cik = state.entity?.cik;\nconst ticker = state.entity?.ticker;\nstate.research = state.research || { financials: {}, peers: [], news_events: [], market_data: {} };\nstate.audit_log = state.audit_log || [];\nif (!cik) {\n  state.audit_log.push({ timestamp: now, workflow_name: 'WF_RESEARCH_PUBLIC', status: 'WARN', message: 'No CIK available; SEC public research cannot run.' });\n}\nreturn [{\n  json: {\n    state,\n    cik,\n    ticker,\n    urls: {\n      sec_submissions: cik ? `https://data.sec.gov/submissions/CIK${cik}.json` : null,\n      sec_company_facts: cik ? `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json` : null\n    },\n    source_tags: {\n      submissions: 'SEC EDGAR Submissions API',\n      company_facts: 'SEC EDGAR Company Facts XBRL'\n    }\n  }\n}];"
+        }
+      },
+      {
+        "id": "sec_submissions",
+        "name": "Fetch SEC Submissions",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          520,
+          -120
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "={{ $json.urls.sec_submissions || 'https://www.sec.gov/files/company_tickers.json' }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "User-Agent",
+                "value": "DamodaranAnalystSystem/1.0 contact-configured-in-n8n"
+              },
+              {
+                "name": "Accept",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "sec_company_facts",
+        "name": "Fetch SEC Company Facts",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          780,
+          -120
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "={{ $('Prepare SEC Research URLs').first().json.urls.sec_company_facts || 'https://www.sec.gov/files/company_tickers.json' }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "User-Agent",
+                "value": "DamodaranAnalystSystem/1.0 contact-configured-in-n8n"
+              },
+              {
+                "name": "Accept",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 1000,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "public_bundle",
+        "name": "Build Public Research Bundle",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1040,
+          -120
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const prep = $('Prepare SEC Research URLs').first().json;\nconst submissions = $('Fetch SEC Submissions').first().json || {};\nconst facts = $('Fetch SEC Company Facts').first().json || {};\nconst state = prep.state;\nconst now = new Date().toISOString();\nconst recentFilings = (submissions.filings?.recent?.form || []).map((form, index) => ({\n  form,\n  filing_date: submissions.filings.recent.filingDate?.[index] || null,\n  accession_number: submissions.filings.recent.accessionNumber?.[index] || null,\n  report_date: submissions.filings.recent.reportDate?.[index] || null,\n  primary_document: submissions.filings.recent.primaryDocument?.[index] || null,\n  source_name: 'SEC EDGAR Submissions API',\n  source_url: prep.urls.sec_submissions,\n  source_date: now,\n  confidence: 'HIGH'\n})).filter((filing) => ['10-K', '10-Q', '8-K'].includes(filing.form)).slice(0, 40);\nconst usGaapAll = facts?.facts?.['us-gaap'] || {};\nconst supportedFactTags = [\n  'RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet',\n  'GrossProfit', 'OperatingIncomeLoss', 'NetIncomeLoss', 'ProfitLoss',\n  'NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations',\n  'PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets',\n  'LongTermDebtAndFinanceLeaseObligationsNoncurrent', 'LongTermDebtNoncurrent', 'LongTermDebtAndFinanceLeaseObligationsCurrent',\n  'AssetsCurrent', 'LiabilitiesCurrent', 'InterestExpenseNonOperating', 'InterestExpense',\n  'EarningsPerShareDiluted', 'WeightedAverageNumberOfDilutedSharesOutstanding', 'WeightedAverageNumberOfSharesOutstandingDiluted',\n  'DepreciationDepletionAndAmortization', 'DepreciationDepletionAndAmortizationExpense', 'DepreciationAndAmortization',\n  'StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest',\n  'Assets', 'Liabilities', 'CashAndCashEquivalentsAtCarryingValue', 'ShortTermBorrowings'\n];\nfunction compactFact(fact) {\n  const compactUnits = {};\n  for (const [unitName, rows] of Object.entries(fact.units || {})) {\n    if (!Array.isArray(rows)) continue;\n    const compactRows = rows\n      .filter((row) => row && row.val !== undefined && ['10-K', '10-Q'].includes(row.form))\n      .sort((a, b) => String(a.end || '').localeCompare(String(b.end || '')) || String(a.filed || '').localeCompare(String(b.filed || '')))\n      .slice(-16)\n      .map((row) => ({ end: row.end, val: row.val, fy: row.fy, fp: row.fp, form: row.form, filed: row.filed, frame: row.frame }));\n    if (compactRows.length) compactUnits[unitName] = compactRows;\n  }\n  return { label: fact.label, description: fact.description, units: compactUnits };\n}\nconst usGaapCompact = Object.fromEntries(supportedFactTags.filter((tag) => usGaapAll[tag]).map((tag) => [tag, compactFact(usGaapAll[tag])]).filter(([, fact]) => Object.keys(fact.units || {}).length));\nconst secFactsAvailable = Boolean(Object.keys(usGaapCompact).length);\nstate.entity = state.entity || {};\nstate.entity.fiscal_year_end = state.entity.fiscal_year_end || submissions.fiscalYearEnd || null;\nstate.entity.exchange = state.entity.exchange || submissions.exchanges?.[0] || null;\nstate.entity.ticker = state.entity.ticker || submissions.tickers?.[0] || prep.ticker || null;\nstate.entity.reporting_currency = state.entity.reporting_currency || 'USD';\nstate.research = state.research || {};\nstate.research.financials = {\n  source_name: 'SEC EDGAR Company Facts XBRL',\n  source_url: prep.urls.sec_company_facts,\n  source_date: now,\n  confidence: secFactsAvailable ? 'HIGH' : 'LOW',\n  raw_us_gaap_facts: usGaapCompact,\n  available_taxonomies: Object.keys(facts?.facts || {})\n};\nstate.research.filings = {\n  source_name: 'SEC EDGAR Submissions API',\n  source_url: prep.urls.sec_submissions,\n  source_date: now,\n  confidence: recentFilings.length ? 'HIGH' : 'LOW',\n  recent_filings: recentFilings\n};\nstate.research.peer_jobs = {\n  status: 'public_sources_only',\n  primary_logic: 'Use founder override peers first; otherwise use DFA_Peer_Defaults/Claude peer selector. Pull peer financials from SEC EDGAR for US public peers. Do not require paid peer APIs.',\n  target_metrics: ['revenue_growth_yoy', 'gross_margin', 'op_margin', 'fcf_margin', 'debt_to_equity', 'roic_when_inputs_exist'],\n  confidence: 'PENDING_PEER_SEC_FETCH'\n};\nstate.research.market_data_jobs = {\n  status: 'free_public_sources_only',\n  providers: ['SEC share counts', 'company IR pages', 'public market pages discovered via Serper/founder URLs'],\n  requested_fields: ['shares_outstanding_from_SEC', 'market_price_if_public_source_available', 'market_cap_computed_if_price_and_shares_available'],\n  rule: 'If public market price source is unavailable, market cap is N/A. Do not use paid market data APIs.',\n  confidence: 'PENDING_PUBLIC_SOURCE'\n};\nstate.research.news_event_jobs = {\n  status: 'credential_required',\n  providers: ['SEC recent filings', 'Serper'],\n  sec_recent_filings_available: recentFilings.length,\n  serper_queries: [\n    `${state.entity?.legal_name || state.inputs?.company_name} earnings transcript 2024 2025`,\n    `${state.entity?.legal_name || state.inputs?.company_name} restructuring acquisition CEO CFO 2024 2025`,\n    `${state.entity?.legal_name || state.inputs?.company_name} investor relations press release 2025`\n  ],\n  confidence: recentFilings.length ? 'MEDIUM' : 'LOW'\n};\nstate.research.source_status = {\n  sec_submissions: recentFilings.length ? 'OK' : 'EMPTY_OR_FAILED',\n  sec_company_facts: secFactsAvailable ? 'OK' : 'EMPTY_OR_FAILED',\n  fmp: 'DISABLED_NO_PAID_APIS',\n  polygon: 'DISABLED_NO_PAID_APIS',\n  alpha_vantage: 'DISABLED_NO_PAID_APIS',\n  serper: 'OPTIONAL_DISCOVERY_HELPER',\n  company_ir_pages: 'PUBLIC_SOURCE_PRIORITY',\n  sec_filing_html: 'PUBLIC_SOURCE_FALLBACK'\n};\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_RESEARCH_PUBLIC', status: secFactsAvailable ? 'OK' : 'WARN', message: secFactsAvailable ? 'SEC public research bundle built.' : 'SEC company facts unavailable; fallback provider required.' });\nreturn [{ json: state }];"
+        }
+      },
+      {
+        "id": "serper_public_news",
+        "name": "Serper Public News Search",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          1300,
+          -120
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://google.serper.dev/search",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "content-type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ q: ($json.research.news_event_jobs.serper_queries || []).join(' OR '), num: 10 }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "2JT19Mz8usFvinDy",
+            "name": "DFA Serper API Key"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1500,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "attach_serper_public",
+        "name": "Attach Public Serper Events",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1560,
+          -120
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const state = $('Build Public Research Bundle').first().json;\nconst serper = $('Serper Public News Search').first().json || {};\nconst now = new Date().toISOString();\nconst organic = serper.organic || [];\nstate.research.news_events = organic.slice(0, 10).map((item) => ({\n  date: item.date || null,\n  type: 'web_search_signal',\n  title: item.title || '',\n  description: item.snippet || '',\n  source_url: item.link || '',\n  source_name: 'Serper Google Search',\n  source_date: now,\n  confidence: item.link ? 'MEDIUM' : 'LOW',\n  financial_impact_signal: 'Requires Claude/analyst interpretation; not assumed.'\n}));\nstate.research.source_status = state.research.source_status || {};\nstate.research.source_status.serper = organic.length ? 'OK' : 'EMPTY_OR_FAILED';\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_RESEARCH_PUBLIC', status: organic.length ? 'OK' : 'WARN', message: `Attached ${organic.length} Serper public news/search results.` });\nreturn [{ json: state }];"
+        }
+      }
+    ],
+    "connections": {
+      "Subworkflow Input": {
+        "main": [
+          [
+            {
+              "node": "Prepare SEC Research URLs",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare SEC Research URLs": {
+        "main": [
+          [
+            {
+              "node": "Fetch SEC Submissions",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch SEC Submissions": {
+        "main": [
+          [
+            {
+              "node": "Fetch SEC Company Facts",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch SEC Company Facts": {
+        "main": [
+          [
+            {
+              "node": "Build Public Research Bundle",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Public Research Bundle": {
+        "main": [
+          [
+            {
+              "node": "Serper Public News Search",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Serper Public News Search": {
+        "main": [
+          [
+            {
+              "node": "Attach Public Serper Events",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Abdullah  Dilshad",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-26T17:11:57.794Z",
+        "id": 266,
+        "workflowId": "vgS7dQ1OeCpHpXrU",
+        "versionId": "6fb70a54-88ed-4ec4-8bba-3c16189afe59",
+        "event": "activated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      },
+      {
+        "createdAt": "2026-06-26T17:11:57.762Z",
+        "id": 265,
+        "workflowId": "vgS7dQ1OeCpHpXrU",
+        "versionId": "6fb70a54-88ed-4ec4-8bba-3c16189afe59",
+        "event": "deactivated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    ]
+  }
+}

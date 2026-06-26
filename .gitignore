@@ -1,2 +1,4 @@
 .env
 .cursor/mcp.json
+scripts/__pycache__/
+**/__pycache__/

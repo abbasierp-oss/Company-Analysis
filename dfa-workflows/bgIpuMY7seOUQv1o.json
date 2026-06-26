@@ -1,0 +1,122 @@
+{
+  "updatedAt": "2026-06-24T11:56:36.327Z",
+  "createdAt": "2026-06-24T11:50:24.147Z",
+  "id": "bgIpuMY7seOUQv1o",
+  "name": "DFA - Anthropic Model Check TEMP",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "webhook",
+      "name": "Model Check Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dfa-anthropic-model-check",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson",
+        "options": {}
+      },
+      "webhookId": "3986c551-da47-4a6c-abcb-2ff9d5205d34"
+    },
+    {
+      "id": "models",
+      "name": "List Anthropic Models",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.anthropic.com/v1/models",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "higk8M4c3hFtCG0D",
+          "name": "DFA Claude API Key"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    }
+  ],
+  "connections": {
+    "Model Check Webhook": {
+      "main": [
+        [
+          {
+            "node": "List Anthropic Models",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Karachi",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "executionTimeout": 120
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "a61af3be-a0fb-4b5a-97d0-1c43dd759be8",
+  "activeVersionId": null,
+  "versionCounter": 1,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-24T11:50:24.151Z",
+      "createdAt": "2026-06-24T11:50:24.151Z",
+      "role": "workflow:owner",
+      "workflowId": "bgIpuMY7seOUQv1o",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": null
+}

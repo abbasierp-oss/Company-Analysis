@@ -1,0 +1,378 @@
+{
+  "updatedAt": "2026-06-24T18:56:59.519Z",
+  "createdAt": "2026-06-24T11:13:55.802Z",
+  "id": "H7r4ladOcX44a6cu",
+  "name": "DFA - WF_GAMMA_DECK",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Subworkflow Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "prepare",
+      "name": "Prepare Gamma Deck Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst inputs = state.inputs || {};\nconst slideCount = [3, 4, 5].includes(Number(inputs.slide_count)) ? Number(inputs.slide_count) : 4;\nconst deckType = inputs.deck_type || `gamma_${slideCount}_slide_production`;\nconst defaultStructures = {\n  3: [\n    { slide: 1, title: 'Company Financial Snapshot', purpose: 'Show key numbers, source confidence, and why this company matters now.' },\n    { slide: 2, title: 'Strategic Readout', purpose: 'Summarize insights from benchmarks, ratios, and read-between-lines signals.' },\n    { slide: 3, title: 'Executive Move And Sales Angle', purpose: 'Translate insight into recommendation, value hypothesis, and meeting hook.' }\n  ],\n  4: [\n    { slide: 1, title: 'Company And Source Snapshot', purpose: 'Identity, ticker/CIK, source reliability, and latest financial snapshot.' },\n    { slide: 2, title: 'Financial And Peer Signal', purpose: 'Benchmark performance, ratio dashboard, and strengths/weaknesses.' },\n    { slide: 3, title: 'Strategic Insights', purpose: 'Three Damodaran-style insights with expert lens and so-what.' },\n    { slide: 4, title: 'Executive Proposal And Value Hook', purpose: 'Executive recommendation, value hypothesis, discovery questions, and sales narrative.' }\n  ],\n  5: [\n    { slide: 1, title: 'Company Context And Sources', purpose: 'Entity, source pack, data confidence, and missing data.' },\n    { slide: 2, title: 'Financial Snapshot', purpose: 'Revenue, margins, cash flow, debt, EPS, and key ratios.' },\n    { slide: 3, title: 'Benchmark And Trend Readout', purpose: 'Peer context, trend direction, strengths, weaknesses.' },\n    { slide: 4, title: 'Strategic Insights And Risks', purpose: 'Insights plus read-between-lines signals and risks.' },\n    { slide: 5, title: 'Executive Action And Sales Story', purpose: 'Recommended moves, value map, discovery questions, and close.' }\n  ]\n};\nconst structure = defaultStructures[slideCount] || defaultStructures[4];\nfunction latest(series) {\n  return Array.isArray(series) && series.length ? series[series.length - 1] : null;\n}\nfunction metricSummary(metrics = {}) {\n  return Object.fromEntries(Object.entries(metrics).map(([key, series]) => {\n    const item = latest(series);\n    return [key, item ? { value: item.value, unit: item.unit, period: item.period, source_name: item.source_name, confidence: item.confidence, notes: item.notes } : 'N/A'];\n  }));\n}\nfunction trim(value, max = 1400) {\n  return String(value || '').slice(0, max);\n}\nconst compactSections = Object.fromEntries(Object.entries(state.sections || {}).map(([key, value]) => [key, trim(value, 1400)]));\nconst deckInput = {\n  deck_type: deckType,\n  slide_count: structure.length,\n  slide_structure: structure,\n  company: inputs.company_name || state.entity?.legal_name,\n  exec_type: inputs.exec_type,\n  industry: inputs.industry,\n  entity: state.entity,\n  metric_summary: metricSummary(state.normalized?.metrics || {}),\n  source_coverage: state.normalized?.source_coverage || {},\n  reliability_map: state.normalized?.reliability_map || {},\n  formulas: state.normalized?.formulas || {},\n  gaps: (state.normalized?.gaps || []).slice(0, 12),\n  filings: (state.research?.filings?.recent_filings || state.research?.filings?.recent || []).slice(0, 8),\n  news_events: (state.research?.news_events || []).slice(0, 6),\n  source_status: state.research?.source_status || {},\n  sections: compactSections,\n  qa: state.qa || {},\n  source_policy: 'Use only SEC, company IR/public pages, public filings/releases, founder-provided URLs, and Serper-discovered public pages. Serper is discovery only. No paid financial data APIs. Unsupported figures must be N/A.'\n};\nconst system = 'You are a financial analyst and Gamma AI presentation strategist. Create concise executive slides, not a report. Be evidence-first, visual, and C-level. Every number must cite a source tag from the input or be N/A. Do not invent financial figures.';\nconst userTask = `Create a ${structure.length}-slide Gamma AI deck outline. Return raw valid JSON only with keys gamma_markdown, slides_json, missing_data_notes, and suggested_gamma_theme. No markdown fences.\\n\\nRequirements:\\n- Each slide has title, subtitle, 3-4 concise bullets, speaker_notes under 60 words, suggested_visual, source_notes.\\n- Use the requested slide structure exactly.\\n- Keep it short: total gamma_markdown under 1800 words.\\n- Include executive proposal/value hook only as slide content, not a long memo.\\n- The slides_json array length must equal the requested slide count.\\n\\nINPUT_JSON:\\n${JSON.stringify(deckInput)}`;\nreturn [{ json: { state, deckInput, claude_payload: { model: 'claude-sonnet-4-6', max_tokens: 3500, temperature: 0.25, system, messages: [{ role: 'user', content: userTask }] } } }];"
+      }
+    },
+    {
+      "id": "claude",
+      "name": "Claude Gamma Deck Writer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        520,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.claude_payload) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "higk8M4c3hFtCG0D",
+          "name": "DFA Claude API Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 1,
+      "waitBetweenTries": 500,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "parse",
+      "name": "Parse Gamma Deck Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const prep = $('Prepare Gamma Deck Payload').first().json;\nconst state = prep.state;\nconst response = $('Claude Gamma Deck Writer').first().json || {};\nconst now = new Date().toISOString();\nfunction responseText(json) {\n  return (json.content || []).map((part) => part.text || '').join('\\n').trim() || JSON.stringify(json);\n}\nfunction parseJsonish(text) {\n  const cleaned = String(text || '').trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();\n  try { return JSON.parse(cleaned); } catch (e) {}\n  const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n  if (match) {\n    try { return JSON.parse(match[0]); } catch (e) {}\n  }\n  return { gamma_markdown: cleaned, slides_json: [], missing_data_notes: ['Claude output was not strict JSON.'], suggested_gamma_theme: 'Clean executive finance theme' };\n}\nfunction synthesizeSlides(markdown) {\n  const parts = String(markdown || '').split(/\\n---+\\n|\\n## Slide\\s+/i).filter((part) => part.trim());\n  return parts.slice(0, prep.deckInput.slide_count).map((part, index) => {\n    const lines = part.split('\\n').map((line) => line.trim()).filter(Boolean);\n    const title = (lines[0] || `Slide ${index + 1}`).replace(/^\\d+[:.)-]?\\s*/, '');\n    const bullets = lines.filter((line) => /^[-*]\\s+/.test(line)).slice(0, 5).map((line) => line.replace(/^[-*]\\s+/, ''));\n    return { slide_number: index + 1, title, subtitle: '', bullets, speaker_notes: '', suggested_visual: '', source_notes: 'Recovered from markdown because JSON slides were missing.' };\n  });\n}\nconst parsed = parseJsonish(responseText(response));\nconst markdown = parsed.gamma_markdown || '';\nlet slides = Array.isArray(parsed.slides_json) ? parsed.slides_json : [];\nconst notes = Array.isArray(parsed.missing_data_notes) ? parsed.missing_data_notes : [];\nif (!slides.length && markdown) {\n  slides = synthesizeSlides(markdown);\n  notes.push('slides_json was recovered from gamma_markdown.');\n}\nif (slides.length !== prep.deckInput.slide_count) notes.push(`Expected ${prep.deckInput.slide_count} slides; parsed ${slides.length}.`);\nif (response.stop_reason === 'max_tokens') notes.push('Claude stopped at max_tokens; output may be incomplete.');\nstate.gamma_deck = {\n  status: markdown && slides.length ? 'ready' : 'warn',\n  generated_at: now,\n  deck_type: prep.deckInput.deck_type,\n  slide_count: prep.deckInput.slide_count,\n  gamma_markdown: markdown,\n  slides_json: slides,\n  missing_data_notes: notes,\n  suggested_gamma_theme: parsed.suggested_gamma_theme || 'Clean executive finance theme'\n};\nstate.delivery = state.delivery || {};\nstate.delivery.gamma_deck_markdown = state.gamma_deck.gamma_markdown;\nstate.delivery.status = 'gamma_deck_ready';\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_GAMMA_DECK', status: state.gamma_deck.status === 'ready' ? 'OK' : 'WARN', message: `Gamma-ready ${state.gamma_deck.slide_count}-slide deck generated.` });\nreturn [{ json: state }];"
+      }
+    }
+  ],
+  "connections": {
+    "Subworkflow Input": {
+      "main": [
+        [
+          {
+            "node": "Prepare Gamma Deck Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Gamma Deck Payload": {
+      "main": [
+        [
+          {
+            "node": "Claude Gamma Deck Writer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Gamma Deck Writer": {
+      "main": [
+        [
+          {
+            "node": "Parse Gamma Deck Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Karachi",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": true,
+    "executionTimeout": 240
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "36948aa1-2bc4-43a8-99b6-6a724adc3ed5",
+  "activeVersionId": "36948aa1-2bc4-43a8-99b6-6a724adc3ed5",
+  "versionCounter": 6,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-24T11:13:55.803Z",
+      "createdAt": "2026-06-24T11:13:55.803Z",
+      "role": "workflow:owner",
+      "workflowId": "H7r4ladOcX44a6cu",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-06-24T11:25:52.602Z",
+      "createdAt": "2026-06-24T11:25:52.602Z",
+      "id": "PvqNmKlzG0X72TtP",
+      "name": "DFA Analyst System"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-06-24T18:56:52.282Z",
+    "createdAt": "2026-06-24T18:56:52.282Z",
+    "versionId": "36948aa1-2bc4-43a8-99b6-6a724adc3ed5",
+    "workflowId": "H7r4ladOcX44a6cu",
+    "nodes": [
+      {
+        "id": "trigger",
+        "name": "Subworkflow Input",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "inputSource": "passthrough"
+        }
+      },
+      {
+        "id": "prepare",
+        "name": "Prepare Gamma Deck Payload",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          260,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst inputs = state.inputs || {};\nconst slideCount = [3, 4, 5].includes(Number(inputs.slide_count)) ? Number(inputs.slide_count) : 4;\nconst deckType = inputs.deck_type || `gamma_${slideCount}_slide_production`;\nconst defaultStructures = {\n  3: [\n    { slide: 1, title: 'Company Financial Snapshot', purpose: 'Show key numbers, source confidence, and why this company matters now.' },\n    { slide: 2, title: 'Strategic Readout', purpose: 'Summarize insights from benchmarks, ratios, and read-between-lines signals.' },\n    { slide: 3, title: 'Executive Move And Sales Angle', purpose: 'Translate insight into recommendation, value hypothesis, and meeting hook.' }\n  ],\n  4: [\n    { slide: 1, title: 'Company And Source Snapshot', purpose: 'Identity, ticker/CIK, source reliability, and latest financial snapshot.' },\n    { slide: 2, title: 'Financial And Peer Signal', purpose: 'Benchmark performance, ratio dashboard, and strengths/weaknesses.' },\n    { slide: 3, title: 'Strategic Insights', purpose: 'Three Damodaran-style insights with expert lens and so-what.' },\n    { slide: 4, title: 'Executive Proposal And Value Hook', purpose: 'Executive recommendation, value hypothesis, discovery questions, and sales narrative.' }\n  ],\n  5: [\n    { slide: 1, title: 'Company Context And Sources', purpose: 'Entity, source pack, data confidence, and missing data.' },\n    { slide: 2, title: 'Financial Snapshot', purpose: 'Revenue, margins, cash flow, debt, EPS, and key ratios.' },\n    { slide: 3, title: 'Benchmark And Trend Readout', purpose: 'Peer context, trend direction, strengths, weaknesses.' },\n    { slide: 4, title: 'Strategic Insights And Risks', purpose: 'Insights plus read-between-lines signals and risks.' },\n    { slide: 5, title: 'Executive Action And Sales Story', purpose: 'Recommended moves, value map, discovery questions, and close.' }\n  ]\n};\nconst structure = defaultStructures[slideCount] || defaultStructures[4];\nfunction latest(series) {\n  return Array.isArray(series) && series.length ? series[series.length - 1] : null;\n}\nfunction metricSummary(metrics = {}) {\n  return Object.fromEntries(Object.entries(metrics).map(([key, series]) => {\n    const item = latest(series);\n    return [key, item ? { value: item.value, unit: item.unit, period: item.period, source_name: item.source_name, confidence: item.confidence, notes: item.notes } : 'N/A'];\n  }));\n}\nfunction trim(value, max = 1400) {\n  return String(value || '').slice(0, max);\n}\nconst compactSections = Object.fromEntries(Object.entries(state.sections || {}).map(([key, value]) => [key, trim(value, 1400)]));\nconst deckInput = {\n  deck_type: deckType,\n  slide_count: structure.length,\n  slide_structure: structure,\n  company: inputs.company_name || state.entity?.legal_name,\n  exec_type: inputs.exec_type,\n  industry: inputs.industry,\n  entity: state.entity,\n  metric_summary: metricSummary(state.normalized?.metrics || {}),\n  source_coverage: state.normalized?.source_coverage || {},\n  reliability_map: state.normalized?.reliability_map || {},\n  formulas: state.normalized?.formulas || {},\n  gaps: (state.normalized?.gaps || []).slice(0, 12),\n  filings: (state.research?.filings?.recent_filings || state.research?.filings?.recent || []).slice(0, 8),\n  news_events: (state.research?.news_events || []).slice(0, 6),\n  source_status: state.research?.source_status || {},\n  sections: compactSections,\n  qa: state.qa || {},\n  source_policy: 'Use only SEC, company IR/public pages, public filings/releases, founder-provided URLs, and Serper-discovered public pages. Serper is discovery only. No paid financial data APIs. Unsupported figures must be N/A.'\n};\nconst system = 'You are a financial analyst and Gamma AI presentation strategist. Create concise executive slides, not a report. Be evidence-first, visual, and C-level. Every number must cite a source tag from the input or be N/A. Do not invent financial figures.';\nconst userTask = `Create a ${structure.length}-slide Gamma AI deck outline. Return raw valid JSON only with keys gamma_markdown, slides_json, missing_data_notes, and suggested_gamma_theme. No markdown fences.\\n\\nRequirements:\\n- Each slide has title, subtitle, 3-4 concise bullets, speaker_notes under 60 words, suggested_visual, source_notes.\\n- Use the requested slide structure exactly.\\n- Keep it short: total gamma_markdown under 1800 words.\\n- Include executive proposal/value hook only as slide content, not a long memo.\\n- The slides_json array length must equal the requested slide count.\\n\\nINPUT_JSON:\\n${JSON.stringify(deckInput)}`;\nreturn [{ json: { state, deckInput, claude_payload: { model: 'claude-sonnet-4-6', max_tokens: 3500, temperature: 0.25, system, messages: [{ role: 'user', content: userTask }] } } }];"
+        }
+      },
+      {
+        "id": "claude",
+        "name": "Claude Gamma Deck Writer",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          520,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.anthropic.com/v1/messages",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "anthropic-version",
+                "value": "2023-06-01"
+              },
+              {
+                "name": "content-type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.claude_payload) }}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "higk8M4c3hFtCG0D",
+            "name": "DFA Claude API Key"
+          }
+        },
+        "retryOnFail": true,
+        "maxTries": 1,
+        "waitBetweenTries": 500,
+        "onError": "continueRegularOutput",
+        "alwaysOutputData": true
+      },
+      {
+        "id": "parse",
+        "name": "Parse Gamma Deck Output",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          780,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const prep = $('Prepare Gamma Deck Payload').first().json;\nconst state = prep.state;\nconst response = $('Claude Gamma Deck Writer').first().json || {};\nconst now = new Date().toISOString();\nfunction responseText(json) {\n  return (json.content || []).map((part) => part.text || '').join('\\n').trim() || JSON.stringify(json);\n}\nfunction parseJsonish(text) {\n  const cleaned = String(text || '').trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();\n  try { return JSON.parse(cleaned); } catch (e) {}\n  const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n  if (match) {\n    try { return JSON.parse(match[0]); } catch (e) {}\n  }\n  return { gamma_markdown: cleaned, slides_json: [], missing_data_notes: ['Claude output was not strict JSON.'], suggested_gamma_theme: 'Clean executive finance theme' };\n}\nfunction synthesizeSlides(markdown) {\n  const parts = String(markdown || '').split(/\\n---+\\n|\\n## Slide\\s+/i).filter((part) => part.trim());\n  return parts.slice(0, prep.deckInput.slide_count).map((part, index) => {\n    const lines = part.split('\\n').map((line) => line.trim()).filter(Boolean);\n    const title = (lines[0] || `Slide ${index + 1}`).replace(/^\\d+[:.)-]?\\s*/, '');\n    const bullets = lines.filter((line) => /^[-*]\\s+/.test(line)).slice(0, 5).map((line) => line.replace(/^[-*]\\s+/, ''));\n    return { slide_number: index + 1, title, subtitle: '', bullets, speaker_notes: '', suggested_visual: '', source_notes: 'Recovered from markdown because JSON slides were missing.' };\n  });\n}\nconst parsed = parseJsonish(responseText(response));\nconst markdown = parsed.gamma_markdown || '';\nlet slides = Array.isArray(parsed.slides_json) ? parsed.slides_json : [];\nconst notes = Array.isArray(parsed.missing_data_notes) ? parsed.missing_data_notes : [];\nif (!slides.length && markdown) {\n  slides = synthesizeSlides(markdown);\n  notes.push('slides_json was recovered from gamma_markdown.');\n}\nif (slides.length !== prep.deckInput.slide_count) notes.push(`Expected ${prep.deckInput.slide_count} slides; parsed ${slides.length}.`);\nif (response.stop_reason === 'max_tokens') notes.push('Claude stopped at max_tokens; output may be incomplete.');\nstate.gamma_deck = {\n  status: markdown && slides.length ? 'ready' : 'warn',\n  generated_at: now,\n  deck_type: prep.deckInput.deck_type,\n  slide_count: prep.deckInput.slide_count,\n  gamma_markdown: markdown,\n  slides_json: slides,\n  missing_data_notes: notes,\n  suggested_gamma_theme: parsed.suggested_gamma_theme || 'Clean executive finance theme'\n};\nstate.delivery = state.delivery || {};\nstate.delivery.gamma_deck_markdown = state.gamma_deck.gamma_markdown;\nstate.delivery.status = 'gamma_deck_ready';\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_GAMMA_DECK', status: state.gamma_deck.status === 'ready' ? 'OK' : 'WARN', message: `Gamma-ready ${state.gamma_deck.slide_count}-slide deck generated.` });\nreturn [{ json: state }];"
+        }
+      }
+    ],
+    "connections": {
+      "Subworkflow Input": {
+        "main": [
+          [
+            {
+              "node": "Prepare Gamma Deck Payload",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare Gamma Deck Payload": {
+        "main": [
+          [
+            {
+              "node": "Claude Gamma Deck Writer",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Claude Gamma Deck Writer": {
+        "main": [
+          [
+            {
+              "node": "Parse Gamma Deck Output",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Abdullah  Dilshad",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-24T18:56:52.416Z",
+        "id": 229,
+        "workflowId": "H7r4ladOcX44a6cu",
+        "versionId": "36948aa1-2bc4-43a8-99b6-6a724adc3ed5",
+        "event": "activated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      },
+      {
+        "createdAt": "2026-06-24T18:56:59.598Z",
+        "id": 231,
+        "workflowId": "H7r4ladOcX44a6cu",
+        "versionId": "36948aa1-2bc4-43a8-99b6-6a724adc3ed5",
+        "event": "activated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      },
+      {
+        "createdAt": "2026-06-24T18:57:00.518Z",
+        "id": 233,
+        "workflowId": "H7r4ladOcX44a6cu",
+        "versionId": "36948aa1-2bc4-43a8-99b6-6a724adc3ed5",
+        "event": "activated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      },
+      {
+        "createdAt": "2026-06-24T18:56:52.382Z",
+        "id": 228,
+        "workflowId": "H7r4ladOcX44a6cu",
+        "versionId": "36948aa1-2bc4-43a8-99b6-6a724adc3ed5",
+        "event": "deactivated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      },
+      {
+        "createdAt": "2026-06-24T18:56:59.565Z",
+        "id": 230,
+        "workflowId": "H7r4ladOcX44a6cu",
+        "versionId": "36948aa1-2bc4-43a8-99b6-6a724adc3ed5",
+        "event": "deactivated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      },
+      {
+        "createdAt": "2026-06-24T18:57:00.478Z",
+        "id": 232,
+        "workflowId": "H7r4ladOcX44a6cu",
+        "versionId": "36948aa1-2bc4-43a8-99b6-6a724adc3ed5",
+        "event": "deactivated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    ]
+  }
+}
