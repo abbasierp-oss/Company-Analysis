@@ -20,6 +20,9 @@ CLAUDE_CRED = {"httpHeaderAuth": {"id": "higk8M4c3hFtCG0D", "name": "DFA Claude 
 
 
 def load_lib():
+    parts = sorted((CODE / 'lib').glob('*.js'))
+    if parts:
+        return '\n\n'.join(p.read_text().strip() for p in parts) + '\n'
     return (CODE / 'dfa-financial-lib.js').read_text()
 
 
@@ -523,147 +526,44 @@ def patch_api_start_flow(wf):
     wf['active'] = True
 
 
+def load_module(name: str, filename: str):
+    import importlib.util
+    path = ROOT / 'scripts' / filename
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def patch_status_api(wf):
-    status_code = """const row = items[0]?.json || null;
-let state = null;
-try { state = row?.state_json ? JSON.parse(row.state_json) : null; } catch (e) {}
-const freshness = state?.data_freshness || {};
-const progress = state?.progress || {};
-return [{ json: {
-  success: Boolean(row?.run_id),
-  run_id: row?.run_id || null,
-  status: row?.status || 'not_found',
-  company_name: row?.company_name || state?.inputs?.company_name || null,
-  current_stage: state?.current_stage || (row?.status === 'completed' ? 'ready' : 'unknown'),
-  progress_pct: progress.pct || (row?.status === 'completed' ? 100 : (row?.status === 'running' ? 15 : 0)),
-  progress_label: progress.label || state?.current_stage || null,
-  data_freshness: freshness,
-  market_data: state?.research?.market_data || null,
-  presentation_prompt_status: state?.presentation_prompt?.status || null,
-  qa_status: state?.qa?.validation_status || null,
-  updated_at: row?.updated_at || state?.updated_at || null,
-  audit_log: (state?.audit_log || []).slice(-8),
-  message: row?.run_id
-    ? (row.status === 'completed' || row.status === 'completed_with_warnings'
-      ? 'Run completed. Fetch result endpoint for full report.'
-      : `Run is ${row.status || 'running'} at stage ${state?.current_stage || 'unknown'}.`)
-    : 'No run found for the supplied run_id.',
-} }];"""
-    set_node_code(wf, 'Build Status Response', status_code)
+    set_node_code(wf, 'Build Status Response', (CODE / 'api/status_response.js').read_text())
     set_respond_cors(wf, 'Return Status JSON')
 
 
 def patch_result_api(wf):
-    result_code = """const row = items[0]?.json || null;
-let state = null;
-try { state = row?.state_json ? JSON.parse(row.state_json) : null; } catch (e) {}
-const freshness = state?.data_freshness || {};
-const market = state?.research?.market_data || {};
-return [{ json: {
-  success: Boolean(row?.run_id),
-  run_id: row?.run_id || null,
-  status: row?.status || 'not_found',
-  company: state?.entity || null,
-  final_report_markdown: state?.final_report_markdown || row?.final_report_markdown || '',
-  presentation_prompt: state?.presentation_prompt?.prompt_text || '',
-  presentation_prompt_status: state?.presentation_prompt?.status || 'missing',
-  data_freshness: freshness,
-  market_data: market,
-  source_coverage: state?.normalized?.source_coverage || {},
-  qa: state?.qa || {},
-  delivery: state?.delivery || {},
-  approval: state?.approval || {},
-  audit_log: (state?.audit_log || []).slice(-12),
-  dashboard: (() => { try { return buildPortalDashboard(state || {}); } catch (e) { return { error: String(e.message || e) }; } })(),
-  it_initiatives: state?.it_initiatives || [],
-  recommendations: state?.executive_proposal?.priorities || [],
-  message: row?.run_id ? 'Result found.' : 'No result found for the supplied run_id.',
-} }];"""
-    set_node_code(wf, 'Build Result Response', result_code)
+    set_node_code(wf, 'Build Result Response', (CODE / 'api/result_response.js').read_text())
     set_respond_cors(wf, 'Return Result JSON')
 
 
-def validate_portal_html(portal_js):
-    """Simulate n8n portal render and ensure inline browser script parses."""
-    import subprocess
-    import tempfile
-    checker = r"""
-const fs = require('fs');
-const vm = require('vm');
-const code = fs.readFileSync(process.argv[1], 'utf8');
-const ctx = {};
-vm.createContext(ctx);
-vm.runInContext(code.replace('return [{ json: { html } }];', 'this.html = html;'), ctx);
-const m = ctx.html.match(/<script>([\s\S]*?)<\/script>/);
-if (!m) throw new Error('portal script block missing');
-new Function(m[1]);
-console.log('portal script OK');
-"""
-    with tempfile.NamedTemporaryFile('w', suffix='.js', delete=False) as fh:
-        fh.write(portal_js)
-        path = fh.name
-    try:
-        subprocess.run(['node', '-e', checker, path], check=True, capture_output=True, text=True)
-    finally:
-        Path(path).unlink(missing_ok=True)
+def validate_portal_html(portal_js: str) -> None:
+    prefix = 'const html = '
+    if not portal_js.startswith(prefix):
+        raise ValueError('portal_render.js missing html assignment')
+    payload = portal_js[len(prefix):].rsplit(';\nreturn', 1)[0].strip()
+    html = json.loads(payload)
+    load_module('portal_assemble', 'portal_assemble.py').validate_portal_script(html)
 
 
 def patch_portal(wf):
-    portal_js = (CODE / 'portal_render.js').read_text()
+    portal_js = load_module('portal_assemble', 'portal_assemble.py').build_portal_render_js()
     validate_portal_html(portal_js)
+    (CODE / 'portal_render.js').write_text(portal_js)
     set_node_code(wf, 'Render Portal HTML', portal_js)
     wf['active'] = True
 
 
 def patch_api_start(wf):
-    init = """const input = items[0]?.json || {};
-const body = input.body || input;
-const now = new Date().toISOString();
-const clean = (v) => String(v || '').trim();
-const companyName = clean(body.company_name || body.companyName || body.company);
-const ticker = clean(body.ticker || body.symbol);
-const execType = clean(body.exec_type || body.executive);
-const industry = clean(body.industry);
-const expertPref = clean(body.expert_pref || body.expert || body.industry_expert);
-const serviceProvider = clean(body.service_provider || body.my_company || body.provider_company) || 'MY COMPANY';
-const peerListRaw = body.peer_list || body.peers || '';
-const peer_list = Array.isArray(peerListRaw) ? peerListRaw : String(peerListRaw || '').split(/[,;\\n|]/).map((s) => s.trim()).filter(Boolean);
-const itInitiativesRaw = body.it_initiatives || body.it_initiative_list || body.initiative_roadmap || '';
-const it_initiatives = Array.isArray(itInitiativesRaw) ? itInitiativesRaw : String(itInitiativesRaw || '').split(/[,;\\n|]/).map((s) => s.trim()).filter(Boolean);
-const expertLibrary = {
-  'media': { name: 'Ben Thompson', reason: 'aggregation theory and distribution power' },
-  'gaming': { name: 'Matthew Ball', reason: 'gaming platforms and interactive media economics' },
-  'banking': { name: 'Jamie Dimon', reason: 'banking strategy, risk, and capital discipline' },
-  'retail': { name: 'Jan Kniffen', reason: 'retail operations and inventory economics' },
-  'healthcare': { name: 'Andy Slavitt', reason: 'healthcare reimbursement and regulation' },
-  'technology': { name: 'Bill Gurley', reason: 'software unit economics' },
-};
-const industryKey = Object.keys(expertLibrary).find((k) => industry.toLowerCase().includes(k));
-const expertResolved = expertPref.toLowerCase().includes('pick')
-  ? (expertLibrary[industryKey] || { name: 'Sector specialist', reason: 'default industry expert' })
-  : { name: expertPref, reason: 'user selected' };
-
-if (!companyName) {
-  return [{ json: { valid: false, accepted: false, status: 'blocked_missing_inputs', conversation_step: 'question_1', missing_inputs: ['company_name'], next_question: 'What is the company name you want analyzed (and ticker symbol if public)?', message: 'Question 1 is required before any analysis can start.', received_at: now } }];
-}
-if (!execType || !industry || !expertPref) {
-  return [{ json: { valid: false, accepted: false, status: 'blocked_missing_inputs', conversation_step: 'question_2', missing_inputs: ['exec_type','industry','expert_pref'].filter((f) => !({exec_type: execType, industry, expert_pref: expertPref })[f]), next_question: 'Which C-level executive is this pitch for, what industry is the company in, and which industry expert perspective should inform the analysis?', message: 'Question 2 is required. No analysis will start until executive, industry, and expert are provided.', company_name_received: companyName, ticker_received: ticker, received_at: now } }];
-}
-
-const runId = body.run_id || `dfa_prod_${Date.now()}`;
-const state = {
-  valid: true,
-  accepted: true,
-  run_id: runId,
-  created_at: now,
-  updated_at: now,
-  status: 'queued',
-  current_stage: 'queued',
-  conversation_complete: true,
-  inputs: { company_name: companyName, ticker, exec_type: execType, industry, expert_pref: expertPref, expert_resolved: expertResolved, service_provider: serviceProvider, peer_list, it_initiatives, source_notes: clean(body.source_notes || ''), human_review: Boolean(body.human_review) },
-};
-return [{ json: state }];"""
-    set_node_code(wf, 'Initialize Accepted Run', init)
+    set_node_code(wf, 'Initialize Accepted Run', (CODE / 'api/start_run_init.js').read_text())
     patch_api_start_flow(wf)
     set_respond_cors(wf, 'Return Production Result')
 
