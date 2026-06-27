@@ -540,8 +540,35 @@ return [{ json: {
     set_node_code(wf, 'Build Result Response', result_code)
 
 
+def validate_portal_html(portal_js):
+    """Simulate n8n portal render and ensure inline browser script parses."""
+    import subprocess
+    import tempfile
+    checker = r"""
+const fs = require('fs');
+const vm = require('vm');
+const code = fs.readFileSync(process.argv[1], 'utf8');
+const ctx = {};
+vm.createContext(ctx);
+vm.runInContext(code.replace('return [{ json: { html } }];', 'this.html = html;'), ctx);
+const m = ctx.html.match(/<script>([\s\S]*?)<\/script>/);
+if (!m) throw new Error('portal script block missing');
+new Function(m[1]);
+console.log('portal script OK');
+"""
+    with tempfile.NamedTemporaryFile('w', suffix='.js', delete=False) as fh:
+        fh.write(portal_js)
+        path = fh.name
+    try:
+        subprocess.run(['node', '-e', checker, path], check=True, capture_output=True, text=True)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
 def patch_portal(wf):
-    set_node_code(wf, 'Render Portal HTML', (CODE / 'portal_render.js').read_text())
+    portal_js = (CODE / 'portal_render.js').read_text()
+    validate_portal_html(portal_js)
+    set_node_code(wf, 'Render Portal HTML', portal_js)
     wf['active'] = True
 
 

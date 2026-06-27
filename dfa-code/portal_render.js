@@ -170,10 +170,10 @@ const html = `<!doctype html>
       const marker = '## Executive Presentation Prompt';
       const start = report.indexOf(marker);
       if (start < 0) return '';
-      const fence = '\x60\x60\x60';
+      const fence = String.fromCharCode(96, 96, 96);
       const fenceStart = report.indexOf(fence, start);
       if (fenceStart < 0) return '';
-      const innerStart = report.indexOf('\n', fenceStart) + 1;
+      const innerStart = report.indexOf('\\n', fenceStart) + 1;
       const innerEnd = report.indexOf(fence, innerStart);
       return innerEnd > innerStart ? report.slice(innerStart, innerEnd).trim() : '';
     }
