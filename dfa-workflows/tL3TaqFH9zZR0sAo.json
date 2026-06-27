@@ -62,9 +62,6 @@
   "meta": null,
   "nodeGroups": [],
   "pinData": null,
-  "versionId": "9e049442-e322-47b3-9ca9-6f8dfec1b0a8",
-  "activeVersionId": null,
-  "versionCounter": 2,
   "triggerCount": 0,
   "sourceWorkflowId": null,
   "shared": [
@@ -94,6 +91,5 @@
       "id": "PvqNmKlzG0X72TtP",
       "name": "DFA Analyst System"
     }
-  ],
-  "activeVersion": null
+  ]
 }
