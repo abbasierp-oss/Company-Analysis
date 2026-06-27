@@ -53,7 +53,8 @@
         "options": {
           "waitForSubWorkflow": false
         }
-      }
+      },
+      "onError": "continueRegularOutput"
     },
     {
       "id": "save_run",
@@ -242,17 +243,6 @@
         ]
       ]
     },
-    "Run Production Orchestrator": {
-      "main": [
-        [
-          {
-            "node": "Build API Response",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Initialize Accepted Run": {
       "main": [
         [
@@ -285,6 +275,11 @@
     "Save Queued Run State": {
       "main": [
         [
+          {
+            "node": "Build API Response",
+            "type": "main",
+            "index": 0
+          },
           {
             "node": "Restore Accepted State For Orchestrator",
             "type": "main",

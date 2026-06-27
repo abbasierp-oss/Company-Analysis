@@ -504,6 +504,23 @@ return [{ json: state }];""")
         ]]}
         wf['connections']['Continue Pipeline'] = {'main': [downstream]}
 
+    wf['active'] = True
+
+
+def patch_api_start_flow(wf):
+    """Return API response immediately; run orchestrator in parallel."""
+    wf['connections']['Save Queued Run State'] = {
+        'main': [[
+            {'node': 'Build API Response', 'type': 'main', 'index': 0},
+            {'node': 'Restore Accepted State For Orchestrator', 'type': 'main', 'index': 0},
+        ]]
+    }
+    wf['connections'].pop('Run Production Orchestrator', None)
+    for n in wf['nodes']:
+        if n['name'] == 'Run Production Orchestrator':
+            n['onError'] = 'continueRegularOutput'
+    wf['active'] = True
+
 
 def patch_status_api(wf):
     status_code = """const row = items[0]?.json || null;
@@ -641,6 +658,7 @@ const state = {
 };
 return [{ json: state }];"""
     set_node_code(wf, 'Initialize Accepted Run', init)
+    patch_api_start_flow(wf)
     set_respond_cors(wf, 'Return Production Result')
 
 
@@ -676,11 +694,11 @@ def main():
         ('xpn2OzryO0ZENK8h', patch_delivery),
         ('Hep7G1mvINz1NdqG', patch_assemble_qa),
         ('RLp9AMthAvTC0iBC', patch_analyze),
+        ('Qc2t6hELYvHMtuox', patch_main_prod),
         ('0purjOnIMYZOauYb', patch_api_start),
         ('n7RG6ijbdmdOrGll', patch_status_api),
         ('YyNOFcGZntWanYNn', patch_result_api),
         ('A8xUUjaD7DMUk1sn', patch_portal),
-        ('Qc2t6hELYvHMtuox', patch_main_prod),
     ]
     results = []
     for wid, fn in patches_order:
@@ -695,7 +713,7 @@ def main():
         resp = put_workflow(wf)
         results.append((wf['name'], wid, 'OK', resp.get('updatedAt')))
         print('UPDATED', wf['name'], wid)
-        if wid in ('tL3TaqFH9zZR0sAo', 'A8xUUjaD7DMUk1sn', '0purjOnIMYZOauYb', 'n7RG6ijbdmdOrGll', 'YyNOFcGZntWanYNn'):
+        if wid in ('tL3TaqFH9zZR0sAo', 'A8xUUjaD7DMUk1sn', '0purjOnIMYZOauYb', 'n7RG6ijbdmdOrGll', 'YyNOFcGZntWanYNn', 'Qc2t6hELYvHMtuox'):
             api('POST', f'/api/v1/workflows/{wid}/activate', {})
             print('ACTIVATED', wf['name'])
     print(json.dumps(results, indent=2))
