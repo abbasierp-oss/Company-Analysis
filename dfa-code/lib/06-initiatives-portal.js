@@ -79,7 +79,9 @@ function buildPortalDashboard(state) {
   const linked = (state.executive_proposal?.priorities || []).map((p, i) => linkRecommendationToInitiative(p, initiatives, i));
   const peers = state.peer_benchmarks?.peers || [];
   const targetPeer = state.peer_benchmarks?.target || null;
-  const productPeers = state.peer_benchmarks?.product_comparison || [];
+  const productComparison = state.peer_benchmarks?.product_comparison || {};
+  const competitorRows = productComparison.rows || [];
+  const competitorColumns = productComparison.metric_columns || [];
 
   function metricTile(id, label, metric, kind) {
     const val = metric && metric.value != null ? formatQuarterlyMetric(metric, kind) : naReason(label + ' not on anchored filing');
@@ -116,7 +118,13 @@ function buildPortalDashboard(state) {
       benchmark_fy: state.peer_benchmarks?.benchmark_fy || null,
       target: targetPeer ? { name: targetPeer.name, metrics: targetPeer.metrics } : null,
       peers: peerBars,
-      product_peers: productPeers.slice(0, 4),
+      product_comparison: {
+        published: productComparison.has_data === true,
+        category: productComparison.category || null,
+        category_label: productComparison.category_label || null,
+        metric_columns: competitorColumns,
+        rows: competitorRows.slice(0, 6),
+      },
     },
     initiative_impact: linked.map((rec) => ({
       initiative: rec.initiative_name,

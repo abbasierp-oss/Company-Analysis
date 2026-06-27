@@ -5,7 +5,7 @@ const company = state.entity?.legal_name || state.inputs?.company_name || 'Compa
 const inputPeers = parsePeerList(state.inputs?.peer_list || state.inputs?.advanced_context?.peers || state.inputs?.advanced_context?.known_competitors);
 const peerNames = (inputPeers.length ? inputPeers : peerDefaults(industry, company))
   .filter((name) => normName(name) !== normName(company))
-  .slice(0, 3);
+  .slice(0, 5);
 const metricLabels = ['Revenue', 'Gross Margin', 'Operating Margin', 'Net Margin', 'FCF Margin', 'Current Ratio', 'YoY Revenue Growth', '3-Year Revenue CAGR', 'Net Debt / EBITDA', 'Interest Coverage', 'ROCE/ROIC', 'Asset Turnover'];
 const fyAnchor = state.research?.filing_anchors?.annual_10k;
 const benchmarkFy = fyAnchor?.fy ? Number(fyAnchor.fy) : 2025;
@@ -49,15 +49,18 @@ function companyRowFromAnchors() {
   };
 }
 
+const resolvedPeers = peerNames.map((name) => resolveCompetitorEntity(name, industry));
 const peers = [];
 for (let i = 0; i < peerNames.length; i++) {
   const name = peerNames[i];
+  const resolved = resolvedPeers[i];
+  const secLookupName = resolved.sec_lookup_name || name;
   const role = i === 0 ? 'best-in-class or scale benchmark' : (i === 1 ? 'close competitor' : 'industry peer');
   let metrics = Object.fromEntries(metricLabels.map((m) => [m, naReason('peer SEC data not yet fetched')]));
   let source_status = 'NO_SEC_MATCH';
   let reliability = naReason('peer not matched in SEC directory');
   try {
-    const { best, cik } = resolveCikFromDirectory(directory, name, '');
+    const { best, cik } = resolveCikFromDirectory(directory, secLookupName, resolved.ticker || '');
     if (cik) {
       const factsResp = await secGet.call(this, `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`);
       const usGaap = factsResp?.facts?.['us-gaap'] || {};
@@ -77,14 +80,26 @@ for (let i = 0; i < peerNames.length; i++) {
     source_status = `SEC_FETCH_ERROR: ${e.message || e}`;
     reliability = 'LOW';
   }
-  peers.push({ name, role, ticker: null, metrics, source_status, reliability });
+  peers.push({
+    name,
+    entered_name: resolved.entered_name,
+    resolved_label: resolved.resolved_label,
+    parent_company: resolved.parent_company,
+    category: resolved.category,
+    resolution_note: resolved.resolution_note,
+    sec_lookup_name: secLookupName,
+    role,
+    ticker: resolved.ticker || null,
+    metrics,
+    source_status,
+    reliability,
+  });
 }
 
 const companyRow = companyRowFromAnchors();
 const peersWithCore = peers.filter((p) => peerRowHasCoreMetrics(p.metrics));
 const tablePublished = peerRowHasCoreMetrics(companyRow.metrics) && peersWithCore.length >= 2;
-const productEntities = [company, ...peerNames];
-const productComparison = buildProductPeerComparison(state, productEntities);
+const productComparison = buildCompetitorComparisons(state, company, peerNames);
 let markdown;
 if (tablePublished) {
   const columns = ['Entity', 'Role', ...metricLabels];

@@ -136,6 +136,24 @@
     .initiative-card h4 { margin: 0 0 6px; font-family: Cinzel, Georgia, serif; font-size: 0.95rem; }
     .initiative-card p { margin: 4px 0; font-size: 0.92rem; color: var(--ink-soft); line-height: 1.45; }
     .initiative-card .tag { font-size: 0.75rem; color: var(--gold); font-style: italic; }
+    .competitor-card {
+      background: #fffdf8; border: 1px solid var(--line); border-left: 3px solid var(--gold);
+      padding: 14px 16px; border-radius: 2px; margin-bottom: 12px;
+    }
+    .competitor-card h4 { margin: 0 0 4px; font-family: Cinzel, Georgia, serif; font-size: 0.95rem; }
+    .competitor-card .resolved { font-size: 0.82rem; color: var(--ink-soft); margin: 0 0 10px; }
+    .competitor-card .resolved em { color: var(--burgundy); font-style: normal; }
+    .comp-metric-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .comp-metric {
+      background: rgba(184, 134, 11, 0.06); border: 1px solid var(--line);
+      padding: 8px 10px; border-radius: 2px;
+    }
+    .comp-metric b {
+      display: block; font-family: Cinzel, Georgia, serif; font-size: 0.58rem;
+      letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 4px;
+    }
+    .comp-metric span { font-size: 0.88rem; color: var(--ink); line-height: 1.35; }
+    .comp-metric.na span { color: var(--ink-soft); font-style: italic; }
     .prompt-side { display: grid; gap: 12px; }
     .prompt-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .bar { height: 8px; background: var(--stone); border-radius: 1px; overflow: hidden; margin-top: 12px; }
@@ -152,7 +170,7 @@
     .status-line { margin: 0 0 8px; }
     .empty-dash { padding: 24px; text-align: center; color: var(--ink-soft); font-style: italic; }
     @media (max-width: 960px) {
-      .hero, .output-grid, .grid2, .metric-grid { grid-template-columns: 1fr; }
+      .hero, .output-grid, .grid2, .metric-grid, .comp-metric-grid { grid-template-columns: 1fr; }
       .brand h1 { font-size: 1.35rem; }
       .bar-row { grid-template-columns: 90px 1fr 54px; }
     }

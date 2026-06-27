@@ -36,6 +36,8 @@ class LibBundleTests(unittest.TestCase):
         lib = build_financial_lib()
         self.assertIn('function getQuarterlyAnchorMetrics', lib)
         self.assertIn('function buildPortalDashboard', lib)
+        self.assertIn('function resolveCompetitorEntity', lib)
+        self.assertIn('function buildCompetitorComparisons', lib)
         self.assertIn('function extractITInitiatives', lib)
 
     def test_lib_bundle_same_line_count_order(self):

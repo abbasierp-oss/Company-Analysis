@@ -21,6 +21,52 @@ function renderBarRows(container, rows) {
   container.innerHTML = rows.join('') || '<p class="small">No chart data available.</p>';
 }
 
+function escapeHtml(str) {
+  return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function renderCompetitorComparisons(productComparison) {
+  const block = document.getElementById('competitorBlock');
+  const cards = document.getElementById('competitorCards');
+  const title = document.getElementById('competitorTitle');
+  const subtitle = document.getElementById('competitorSubtitle');
+  const data = productComparison || {};
+  const rows = data.rows || [];
+  const columns = data.metric_columns || [];
+
+  if (!rows.length || !data.published) {
+    block.style.display = 'none';
+    return;
+  }
+
+  block.style.display = 'block';
+  title.textContent = 'Competitor Comparison';
+  subtitle.textContent = data.category_label
+    ? data.category_label + ' — metrics from public sources; N/A when not disclosed.'
+    : 'Product and service metrics from public sources; N/A when not disclosed.';
+
+  cards.innerHTML = rows.map(function(row) {
+    const showResolved = row.entered_name && row.resolved_label
+      && row.entered_name.toLowerCase() !== row.resolved_label.toLowerCase();
+    const header = row.role === 'target company'
+      ? escapeHtml(row.entered_name || row.resolved_label) + ' (your company)'
+      : escapeHtml(row.entered_name || row.resolved_label);
+    const resolvedLine = showResolved
+      ? '<p class="resolved">Resolved to <em>' + escapeHtml(row.resolved_label) + '</em>'
+        + (row.parent_company ? ' · ' + escapeHtml(row.parent_company) : '') + '</p>'
+      : (row.parent_company && row.kind !== 'standalone'
+        ? '<p class="resolved">' + escapeHtml(row.parent_company) + '</p>' : '');
+    const metricHtml = columns.map(function(col) {
+      const val = (row.metrics && row.metrics[col.key]) || 'N/A';
+      const isNa = val === 'N/A' || String(val).startsWith('Not available');
+      return '<div class="comp-metric' + (isNa ? ' na' : '') + '"><b>' + escapeHtml(col.label)
+        + '</b><span>' + escapeHtml(val) + '</span></div>';
+    }).join('');
+    return '<article class="competitor-card"><h4>' + header + '</h4>' + resolvedLine
+      + '<div class="comp-metric-grid">' + metricHtml + '</div></article>';
+  }).join('');
+}
+
 function renderInitiativeCards(recs, initiatives) {
   const initBlock = document.getElementById('initiativeBlock');
   const initCards = document.getElementById('initiativeCards');
@@ -73,15 +119,17 @@ function renderDashboard(data) {
 
   const peerChart = document.getElementById('peerChart');
   const peers = (dash.peer_comparison && dash.peer_comparison.peers) || [];
-  if (peers.length) {
+  if (peers.length && dash.peer_comparison.published) {
     peerChart.style.display = 'block';
     renderBarRows(document.getElementById('peerBars'), peers.map(function(p) {
       const pct = parsePct(p.operating_margin) || 30;
-      return '<div class="bar-row"><div class="bar-label">' + p.name + '</div><div class="bar-track"><div class="bar-fill" style="width:' + Math.min(100, pct) + '%"></div></div><div class="bar-val">' + p.operating_margin + '</div></div>';
+      return '<div class="bar-row"><div class="bar-label">' + escapeHtml(p.name) + '</div><div class="bar-track"><div class="bar-fill" style="width:' + Math.min(100, pct) + '%"></div></div><div class="bar-val">' + escapeHtml(p.operating_margin) + '</div></div>';
     }));
   } else {
     peerChart.style.display = 'none';
   }
+
+  renderCompetitorComparisons(dash.peer_comparison && dash.peer_comparison.product_comparison);
 
   renderInitiativeCards(dash.recommendations || dash.initiative_impact || [], dash.initiatives || []);
 }
