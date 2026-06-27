@@ -542,6 +542,7 @@ return [{ json: {
 
 def patch_portal(wf):
     set_node_code(wf, 'Render Portal HTML', (CODE / 'portal_render.js').read_text())
+    wf['active'] = True
 
 
 def patch_api_start(wf):
@@ -644,7 +645,7 @@ def main():
         resp = put_workflow(wf)
         results.append((wf['name'], wid, 'OK', resp.get('updatedAt')))
         print('UPDATED', wf['name'], wid)
-        if wid == 'tL3TaqFH9zZR0sAo':
+        if wid in ('tL3TaqFH9zZR0sAo', 'A8xUUjaD7DMUk1sn', '0purjOnIMYZOauYb', 'n7RG6ijbdmdOrGll', 'YyNOFcGZntWanYNn'):
             api('POST', f'/api/v1/workflows/{wid}/activate', {})
             print('ACTIVATED', wf['name'])
     print(json.dumps(results, indent=2))

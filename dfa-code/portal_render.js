@@ -153,8 +153,15 @@ const html = `<!doctype html>
       if (!data) return '';
       if (data.presentation_prompt) return data.presentation_prompt;
       const report = data.final_report_markdown || '';
-      const match = report.match(/## Executive Presentation Prompt[\\s\\S]*?```\\n([\\s\\S]*?)```/);
-      return match ? match[1].trim() : '';
+      const marker = '## Executive Presentation Prompt';
+      const start = report.indexOf(marker);
+      if (start < 0) return '';
+      const fence = '\x60\x60\x60';
+      const fenceStart = report.indexOf(fence, start);
+      if (fenceStart < 0) return '';
+      const innerStart = report.indexOf('\n', fenceStart) + 1;
+      const innerEnd = report.indexOf(fence, innerStart);
+      return innerEnd > innerStart ? report.slice(innerStart, innerEnd).trim() : '';
     }
     function showTab(name) {
       document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
