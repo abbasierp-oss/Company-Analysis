@@ -1,0 +1,185 @@
+{
+  "updatedAt": "2026-06-25T15:25:08.384Z",
+  "createdAt": "2026-06-24T18:30:58.944Z",
+  "id": "YyNOFcGZntWanYNn",
+  "name": "DFA - API Run Result",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "webhook_result",
+      "name": "Run Result Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "dfa-production/result",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "webhookId": "16827fda-0b43-4c29-9119-9e7760cda533"
+    },
+    {
+      "id": "get_state",
+      "name": "Get Run State Row",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        280,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "IdoSLADBWpuuVRmk",
+          "mode": "id",
+          "cachedResultName": "DFA_Run_State"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "run_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.query.run_id || $json.body.run_id || '' }}"
+            }
+          ]
+        },
+        "returnAll": false,
+        "limit": 1
+      }
+    },
+    {
+      "id": "build_result",
+      "name": "Build Result Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const row = items[0]?.json || null;\nlet state = null;\ntry { state = row?.state_json ? JSON.parse(row.state_json) : null; } catch (e) {}\nconst freshness = state?.data_freshness || {};\nconst market = state?.research?.market_data || {};\nreturn [{ json: {\n  success: Boolean(row?.run_id),\n  run_id: row?.run_id || null,\n  status: row?.status || 'not_found',\n  company: state?.entity || null,\n  final_report_markdown: state?.final_report_markdown || row?.final_report_markdown || '',\n  presentation_prompt: state?.presentation_prompt?.prompt_text || '',\n  presentation_prompt_status: state?.presentation_prompt?.status || 'missing',\n  data_freshness: freshness,\n  market_data: market,\n  source_coverage: state?.normalized?.source_coverage || {},\n  qa: state?.qa || {},\n  delivery: state?.delivery || {},\n  approval: state?.approval || {},\n  audit_log: (state?.audit_log || []).slice(-12),\n  message: row?.run_id ? 'Result found.' : 'No result found for the supplied run_id.',\n} }];"
+      }
+    },
+    {
+      "id": "respond_result",
+      "name": "Return Result JSON",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        840,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Access-Control-Allow-Methods",
+                "value": "GET, POST, OPTIONS"
+              },
+              {
+                "name": "Access-Control-Allow-Headers",
+                "value": "Content-Type"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Run Result Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Run State Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Run State Row": {
+      "main": [
+        [
+          {
+            "node": "Build Result Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Result Response": {
+      "main": [
+        [
+          {
+            "node": "Return Result JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-24T18:30:58.946Z",
+      "createdAt": "2026-06-24T18:30:58.946Z",
+      "role": "workflow:owner",
+      "workflowId": "YyNOFcGZntWanYNn",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-06-24T11:25:52.602Z",
+      "createdAt": "2026-06-24T11:25:52.602Z",
+      "id": "PvqNmKlzG0X72TtP",
+      "name": "DFA Analyst System"
+    }
+  ]
+}

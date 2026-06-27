@@ -1,0 +1,345 @@
+{
+  "updatedAt": "2026-06-26T17:37:50.265Z",
+  "createdAt": "2026-06-24T18:29:21.105Z",
+  "id": "0purjOnIMYZOauYb",
+  "name": "DFA - API Start Run",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "webhook_start",
+      "name": "Start Run Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dfa-production/start",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "864a41ac-3f2d-4f00-b718-3b81bc7d1a61",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "run_prod",
+      "name": "Run Production Orchestrator",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        980,
+        0
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "Qc2t6hELYvHMtuox",
+          "mode": "id",
+          "cachedResultName": "DFA - WF_MAIN_PROD"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "save_run",
+      "name": "Save Queued Run State",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        560,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "IdoSLADBWpuuVRmk",
+          "mode": "id",
+          "cachedResultName": "DFA_Run_State"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "run_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.run_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "run_id": "={{ $json.run_id }}",
+            "created_at": "={{ $json.created_at }}",
+            "updated_at": "={{ $json.updated_at }}",
+            "company_name": "={{ $json.inputs.company_name }}",
+            "exec_type": "={{ $json.inputs.exec_type }}",
+            "industry": "={{ $json.inputs.industry }}",
+            "status": "queued",
+            "state_json": "={{ JSON.stringify($('Initialize Accepted Run').first().json) }}",
+            "final_report_markdown": "",
+            "google_doc_url": "",
+            "pdf_url": ""
+          },
+          "matchingColumns": [
+            "run_id"
+          ],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "build_response",
+      "name": "Build API Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1260,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const state = $('Initialize Accepted Run').first().json || {};\nconst base = 'https://evoloai.app.n8n.cloud/webhook';\nif (state.valid === false) {\n  return [{ json: {\n    success: false,\n    accepted: false,\n    status: state.status || 'blocked_missing_inputs',\n    missing_inputs: state.missing_inputs || [],\n    message: state.message || 'Required inputs are missing. The production run was not started.',\n    next_question: state.next_question || 'Please provide the missing required inputs.'\n  } }];\n}\nreturn [{ json: {\n  success: true,\n  accepted: true,\n  run_id: state.run_id,\n  status: 'queued',\n  current_stage: 'queued',\n  company_name: state.inputs.company_name,\n  expert_resolved: state.inputs.expert_resolved,\n  service_provider: state.inputs.service_provider,\n  message: 'Run accepted. The production orchestrator is processing in the background.',\n  status_url: `${base}/dfa-production/status?run_id=${encodeURIComponent(state.run_id)}`,\n  result_url: `${base}/dfa-production/result?run_id=${encodeURIComponent(state.run_id)}`\n} }];"
+      }
+    },
+    {
+      "id": "respond",
+      "name": "Return Production Result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Access-Control-Allow-Methods",
+                "value": "GET, POST, OPTIONS"
+              },
+              {
+                "name": "Access-Control-Allow-Headers",
+                "value": "Content-Type"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "init_accepted",
+      "name": "Initialize Accepted Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        180,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const input = items[0]?.json || {};\nconst body = input.body || input;\nconst now = new Date().toISOString();\nconst clean = (v) => String(v || '').trim();\nconst companyName = clean(body.company_name || body.companyName || body.company);\nconst ticker = clean(body.ticker || body.symbol);\nconst execType = clean(body.exec_type || body.executive);\nconst industry = clean(body.industry);\nconst expertPref = clean(body.expert_pref || body.expert || body.industry_expert);\nconst serviceProvider = clean(body.service_provider || body.my_company || body.provider_company) || 'MY COMPANY';\nconst peerListRaw = body.peer_list || body.peers || '';\nconst peer_list = Array.isArray(peerListRaw) ? peerListRaw : String(peerListRaw || '').split(/[,;\\n|]/).map((s) => s.trim()).filter(Boolean);\nconst expertLibrary = {\n  'media': { name: 'Ben Thompson', reason: 'aggregation theory and distribution power' },\n  'gaming': { name: 'Matthew Ball', reason: 'gaming platforms and interactive media economics' },\n  'banking': { name: 'Jamie Dimon', reason: 'banking strategy, risk, and capital discipline' },\n  'retail': { name: 'Jan Kniffen', reason: 'retail operations and inventory economics' },\n  'healthcare': { name: 'Andy Slavitt', reason: 'healthcare reimbursement and regulation' },\n  'technology': { name: 'Bill Gurley', reason: 'software unit economics' },\n};\nconst industryKey = Object.keys(expertLibrary).find((k) => industry.toLowerCase().includes(k));\nconst expertResolved = expertPref.toLowerCase().includes('pick')\n  ? (expertLibrary[industryKey] || { name: 'Sector specialist', reason: 'default industry expert' })\n  : { name: expertPref, reason: 'user selected' };\n\nif (!companyName) {\n  return [{ json: { valid: false, accepted: false, status: 'blocked_missing_inputs', conversation_step: 'question_1', missing_inputs: ['company_name'], next_question: 'What is the company name you want analyzed (and ticker symbol if public)?', message: 'Question 1 is required before any analysis can start.', received_at: now } }];\n}\nif (!execType || !industry || !expertPref) {\n  return [{ json: { valid: false, accepted: false, status: 'blocked_missing_inputs', conversation_step: 'question_2', missing_inputs: ['exec_type','industry','expert_pref'].filter((f) => !({exec_type: execType, industry, expert_pref: expertPref })[f]), next_question: 'Which C-level executive is this pitch for, what industry is the company in, and which industry expert perspective should inform the analysis?', message: 'Question 2 is required. No analysis will start until executive, industry, and expert are provided.', company_name_received: companyName, ticker_received: ticker, received_at: now } }];\n}\n\nconst runId = body.run_id || `dfa_prod_${Date.now()}`;\nconst state = {\n  valid: true,\n  accepted: true,\n  run_id: runId,\n  created_at: now,\n  updated_at: now,\n  status: 'queued',\n  current_stage: 'queued',\n  conversation_complete: true,\n  inputs: { company_name: companyName, ticker, exec_type: execType, industry, expert_pref: expertPref, expert_resolved: expertResolved, service_provider: serviceProvider, peer_list, human_review: Boolean(body.human_review) },\n};\nreturn [{ json: state }];"
+      }
+    },
+    {
+      "id": "inputs_valid",
+      "name": "Inputs Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        380,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "valid_state",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "restore_state",
+      "name": "Restore Accepted State For Orchestrator",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const state = $('Initialize Accepted Run').first().json;\nreturn [{ json: state }];"
+      }
+    }
+  ],
+  "connections": {
+    "Build API Response": {
+      "main": [
+        [
+          {
+            "node": "Return Production Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Run Webhook": {
+      "main": [
+        [
+          {
+            "node": "Initialize Accepted Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initialize Accepted Run": {
+      "main": [
+        [
+          {
+            "node": "Inputs Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inputs Valid?": {
+      "main": [
+        [
+          {
+            "node": "Save Queued Run State",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build API Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Queued Run State": {
+      "main": [
+        [
+          {
+            "node": "Build API Response",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Restore Accepted State For Orchestrator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Accepted State For Orchestrator": {
+      "main": [
+        [
+          {
+            "node": "Run Production Orchestrator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "executionTimeout": 360
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-24T18:29:21.108Z",
+      "createdAt": "2026-06-24T18:29:21.108Z",
+      "role": "workflow:owner",
+      "workflowId": "0purjOnIMYZOauYb",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-06-24T11:25:52.602Z",
+      "createdAt": "2026-06-24T11:25:52.602Z",
+      "id": "PvqNmKlzG0X72TtP",
+      "name": "DFA Analyst System"
+    }
+  ]
+}
