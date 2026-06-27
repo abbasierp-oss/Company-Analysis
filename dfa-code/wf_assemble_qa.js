@@ -97,7 +97,9 @@ const baseSectionOrder = [
   's7_rtbl', 's8_assumptions', 's9_sales',
 ];
 const sectionOrder = baseSectionOrder.filter((id) => {
-  if (id === 's3_benchmarks') return state.peer_benchmarks?.table_published === true && state.sections.s3_benchmarks;
+  if (id === 's3_benchmarks') {
+    return Boolean(state.peer_benchmarks?.markdown && (state.peer_benchmarks?.table_published || state.peer_benchmarks?.product_comparison_published));
+  }
   return Boolean(state.sections[id]);
 });
 

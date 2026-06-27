@@ -24,9 +24,7 @@ const html = `<!doctype html>
     input, select, textarea { width:100%; background:#0f1730; border:1px solid var(--line); border-radius:13px; color:var(--text); padding:13px 14px; font:inherit; outline:none; }
     textarea { min-height:92px; resize:vertical; }
     .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-    .step { display:none; }
-    .step.show { display:grid; gap:14px; }
-    .step-title { padding:12px 14px; background:#0d1429; border:1px solid var(--line); border-radius:14px; color:#edf5ff; font-weight:800; }
+    .section-title { padding:12px 14px; background:#0d1429; border:1px solid var(--line); border-radius:14px; color:#edf5ff; font-weight:800; }
     button { cursor:pointer; border:0; border-radius:13px; padding:14px 16px; font-weight:900; color:#06101f; background:linear-gradient(135deg, var(--accent), #9effd0); }
     button.secondary { background:#253153; color:var(--text); border:1px solid var(--line); }
     button:disabled { opacity:.6; cursor:not-allowed; }
@@ -58,7 +56,7 @@ const html = `<!doctype html>
       <div class="card intro">
         <div class="eyebrow">Executive Financial Analysis System</div>
         <h1>Live SEC financials to full analyst report and presentation prompt.</h1>
-        <p>Financial figures are fetched live from SEC EDGAR and public market sources at run time. The system gates on your two required questions before starting analysis.</p>
+        <p>Financial figures are fetched live from SEC EDGAR and public market sources at run time. Complete the form below to start analysis.</p>
         <div class="pillrow">
           <span class="pill">Live SEC EDGAR fetch</span>
           <span class="pill">Real-time market cap</span>
@@ -69,28 +67,28 @@ const html = `<!doctype html>
       </div>
       <div class="card">
         <form id="dfaForm">
-          <div id="step1" class="step show">
-            <div class="step-title">Question 1: What is the company name you want analyzed, and ticker symbol if public?</div>
-            <div><label>Company name</label><input name="company_name" placeholder="Example: Microsoft Corporation" required /></div>
-            <div><label>Ticker symbol if public</label><input name="ticker" placeholder="Example: MSFT" /></div>
-            <button id="nextBtn" type="button">Continue to Question 2</button>
+          <div class="section-title">Company</div>
+          <div><label for="company_name">Company name</label><input id="company_name" name="company_name" placeholder="Example: Microsoft Corporation" required /></div>
+          <div><label for="ticker">Ticker symbol if public</label><input id="ticker" name="ticker" placeholder="Example: MSFT" /></div>
+
+          <div class="section-title">Executive context</div>
+          <div class="grid2">
+            <div><label for="exec_type">C-level executive</label><select id="exec_type" name="exec_type" required><option value="">Choose executive</option><option>CFO</option><option>CIO</option><option>CEO</option><option>COO</option><option>CDO</option><option>CISO</option><option>Board</option><option>Investor</option></select></div>
+            <div><label for="industry">Industry</label><input id="industry" name="industry" placeholder="Example: Technology, Media, Streaming" required /></div>
           </div>
-          <div id="step2" class="step">
-            <div class="step-title">Question 2: Which executive, industry, and expert perspective should inform the analysis?</div>
-            <div class="grid2">
-              <div><label>C-level executive</label><select name="exec_type" required><option value="">Choose executive</option><option>CFO</option><option>CIO</option><option>CEO</option><option>COO</option><option>CDO</option><option>CISO</option><option>Board</option><option>Investor</option></select></div>
-              <div><label>Industry</label><input name="industry" placeholder="Example: Technology" required /></div>
-            </div>
-            <div><label>Industry expert to blend</label><input name="expert_pref" placeholder="Expert name or type: pick for me" required /></div>
-            <div class="grid2">
-              <div><label>Service provider name</label><input name="service_provider" placeholder="Example: Evolo AI" /></div>
-              <div><label>Slide count</label><select name="slide_count"><option>3</option><option selected>4</option><option>5</option></select></div>
-            </div>
-            <div><label>Peer list (optional)</label><input name="peer_list" placeholder="Comma-separated peers" /></div>
-            <div><label>Source URLs or notes</label><textarea name="source_notes" placeholder="Investor relations URLs, annual reports, founder notes"></textarea></div>
-            <div class="actions"><button class="secondary" id="backBtn" type="button">Back</button><button id="runBtn" type="submit">Run Production Analysis</button></div>
-            <div class="small">Runs typically take 5–10 minutes. Financial data is always pulled fresh from SEC EDGAR at execution time.</div>
+          <div><label for="expert_pref">Industry expert to blend</label><input id="expert_pref" name="expert_pref" placeholder="Expert name or type: pick for me" required /></div>
+          <div class="grid2">
+            <div><label for="service_provider">Service provider name</label><input id="service_provider" name="service_provider" placeholder="Example: Evolo AI" /></div>
+            <div><label for="slide_count">Slide count</label><select id="slide_count" name="slide_count"><option>3</option><option selected>4</option><option>5</option></select></div>
           </div>
+
+          <div class="section-title">Peer comparison</div>
+          <div><label for="peer_list">Peer products or competitors (optional)</label><input id="peer_list" name="peer_list" placeholder="Example: HBO Max, Disney+, Amazon Prime Video" aria-describedby="peerHelp" /></div>
+          <p class="small" id="peerHelp">Enter streaming services or product peers (comma-separated). The report will compare subscribers, pricing tiers, ad-supported plans, and product differences when public data is available; otherwise N/A.</p>
+          <div><label for="source_notes">Source URLs or notes</label><textarea id="source_notes" name="source_notes" placeholder="Investor relations URLs, pricing pages, subscriber disclosures, annual reports"></textarea></div>
+
+          <div class="actions"><button id="runBtn" type="submit">Run Production Analysis</button></div>
+          <div class="small">Runs typically take 5–10 minutes. Financial data is always pulled fresh from SEC EDGAR at execution time.</div>
         </form>
       </div>
     </section>
@@ -129,8 +127,6 @@ const html = `<!doctype html>
   </main>
   <script>
     const form = document.getElementById('dfaForm');
-    const step1 = document.getElementById('step1');
-    const step2 = document.getElementById('step2');
     const statusEl = document.getElementById('status');
     const resultsEl = document.getElementById('results');
     const runBtn = document.getElementById('runBtn');
@@ -169,13 +165,6 @@ const html = `<!doctype html>
       document.getElementById('panelPrompt').classList.toggle('show', name === 'prompt');
     }
     document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
-    document.getElementById('nextBtn').addEventListener('click', () => {
-      if (!form.company_name.value.trim()) { alert('Company name is required.'); return; }
-      step1.classList.remove('show'); step2.classList.add('show');
-    });
-    document.getElementById('backBtn').addEventListener('click', () => {
-      step2.classList.remove('show'); step1.classList.add('show');
-    });
     async function pollStatus(statusUrl, resultUrl) {
       for (let i = 0; i < 180; i++) {
         const status = await (await fetch(statusUrl)).json();

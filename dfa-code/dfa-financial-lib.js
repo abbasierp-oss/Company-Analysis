@@ -855,8 +855,11 @@ function peerDefaults(industry, companyName) {
     manufacturing: ['General Electric', 'Honeywell', 'Caterpillar', '3M', 'Siemens'],
     gaming: ['Nintendo', 'Electronic Arts', 'Take-Two Interactive', 'Microsoft', 'Roblox'],
     media: ['Disney', 'Netflix', 'Comcast', 'Warner Bros. Discovery', 'Paramount Global'],
+    streaming: ['Netflix', 'Warner Bros. Discovery', 'Disney', 'Amazon', 'Apple'],
   };
-  const match = Object.keys(defaults).find((k) => key.includes(k)) || 'technology';
+  const match = Object.keys(defaults).find((k) => key.includes(k))
+    || (/(stream|video|ott|entertainment)/.test(key) ? 'streaming' : null)
+    || 'technology';
   return defaults[match].filter((name) => normName(name) !== target);
 }
 
@@ -864,6 +867,148 @@ function parsePeerList(raw) {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw;
   return String(raw).split(/[,;\n|]/).map((s) => s.trim()).filter(Boolean);
+}
+
+const PRODUCT_PEER_LABELS = [
+  'Subscribers / paid memberships',
+  'Pricing tiers (entry)',
+  'Ad-supported plan',
+  'Key product difference',
+];
+
+function entityMentionedInText(text, entityName) {
+  const hay = normName(text);
+  const needle = normName(entityName);
+  if (!needle || !hay) return false;
+  if (hay.includes(needle)) return true;
+  const aliases = {
+    hbomax: ['hbo max', 'max streaming', 'warner bros discovery max'],
+    netflix: ['netflix'],
+    disneyplus: ['disney plus', 'disney+'],
+    amazonprimevideo: ['prime video', 'amazon prime video'],
+    appletvplus: ['apple tv plus', 'apple tv+'],
+    paramountplus: ['paramount plus', 'paramount+'],
+  };
+  const key = needle.replace(/[^a-z0-9]/g, '');
+  const list = aliases[key] || [entityName];
+  return list.some((alias) => hay.includes(normName(alias)));
+}
+
+function corpusForEntity(state, entityName) {
+  const signals = [
+    ...(state.research?.news_events || []),
+    ...(state.research?.private_research?.serper_results || []),
+  ];
+  const chunks = [];
+  for (const item of signals) {
+    const text = `${item.title || ''} ${item.description || item.snippet || ''}`.trim();
+    if (text && entityMentionedInText(text, entityName)) {
+      chunks.push({ text, source: item.source_name || item.source_url || 'public search' });
+    }
+  }
+  const notes = String(state.inputs?.source_notes || state.inputs?.advanced_context?.source_notes || '');
+  if (notes && entityMentionedInText(notes, entityName)) {
+    chunks.push({ text: notes, source: 'user source notes' });
+  }
+  return chunks;
+}
+
+function extractSubscriberMetric(text) {
+  const m = text.match(/(\d+(?:\.\d+)?)\s*(million|m|billion|b)?\s*(?:global\s+)?(?:paid\s+)?(?:streaming\s+)?(?:subscribers|memberships|subs)\b/i);
+  if (!m) return null;
+  const num = Number(m[1]);
+  const unit = String(m[2] || '').toLowerCase();
+  let n = num;
+  if (unit.startsWith('b')) n *= 1e9;
+  else if (unit.startsWith('m') || unit === 'million') n *= 1e6;
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B subscribers`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M subscribers`;
+  return `${num} subscribers`;
+}
+
+function extractPricingMetric(text) {
+  const prices = [...text.matchAll(/\$(\d+(?:\.\d+)?)\s*(?:\/|per)\s*month/gi)].map((m) => Number(m[1]));
+  if (!prices.length) {
+    const alt = text.match(/(?:from|starting at|plans? from)\s*\$(\d+(?:\.\d+)?)/i);
+    if (alt) prices.push(Number(alt[1]));
+  }
+  if (!prices.length) return null;
+  const low = Math.min(...prices);
+  const high = Math.max(...prices);
+  return low === high ? `From $${low}/month` : `$${low}–$${high}/month`;
+}
+
+function extractAdSupportedMetric(text) {
+  if (/ad[- ]?free only|no ad[- ]?supported|without ads only/i.test(text)) return 'No (ad-free only)';
+  if (/ad[- ]?supported|with ads|advertising tier|ad tier|ads plan|ad-supported/i.test(text)) return 'Yes';
+  return null;
+}
+
+function extractProductDifference(chunks) {
+  const patterns = [
+    /exclusive originals?/i,
+    /live sports/i,
+    /offline downloads?/i,
+    /password sharing/i,
+    /bundle(?:d)? with/i,
+    /gaming/i,
+    /4k|uhd/i,
+  ];
+  for (const chunk of chunks) {
+    for (const pattern of patterns) {
+      if (!pattern.test(chunk.text)) continue;
+      const sentence = chunk.text.split(/[.!?]/).find((s) => pattern.test(s));
+      if (sentence && sentence.trim().length > 12 && sentence.trim().length < 220) {
+        return sentence.trim();
+      }
+    }
+  }
+  return null;
+}
+
+function extractProductMetricsFromCorpus(chunks) {
+  const combined = chunks.map((c) => c.text).join(' ');
+  return {
+    'Subscribers / paid memberships': extractSubscriberMetric(combined) || 'N/A',
+    'Pricing tiers (entry)': extractPricingMetric(combined) || 'N/A',
+    'Ad-supported plan': extractAdSupportedMetric(combined) || 'N/A',
+    'Key product difference': extractProductDifference(chunks) || 'N/A',
+  };
+}
+
+function buildProductPeerComparison(state, entityNames) {
+  const names = (entityNames || []).filter(Boolean).slice(0, 4);
+  if (!names.length) return { rows: [], markdown: '', has_data: false };
+  const rows = names.map((name) => {
+    const chunks = corpusForEntity(state, name);
+    return {
+      name,
+      metrics: extractProductMetricsFromCorpus(chunks),
+      source_status: chunks.length ? 'PUBLIC_SIGNAL' : 'NO_PUBLIC_SIGNAL',
+      sources: [...new Set(chunks.map((c) => c.source).filter(Boolean))].slice(0, 2),
+    };
+  });
+  const hasData = rows.some((row) => PRODUCT_PEER_LABELS.some((label) => row.metrics[label] !== 'N/A'));
+  if (!hasData) {
+    return { rows, markdown: '', has_data: false };
+  }
+  const markdown = [
+    '### Product-level peer comparison',
+    '',
+    'Comparable product signals from public search and user-provided notes. Metrics show N/A when not found in available sources.',
+    '',
+    '| Product / service | Subscribers | Entry pricing | Ad-supported | Key difference |',
+    '|---|---|---|---|---|',
+    ...rows.map((row) => `| ${row.name} | ${row.metrics['Subscribers / paid memberships']} | ${row.metrics['Pricing tiers (entry)']} | ${row.metrics['Ad-supported plan']} | ${row.metrics['Key product difference']} |`),
+  ].join('\n');
+  return { rows, markdown, has_data: true };
+}
+
+function peerProductSerperQueries(peerNames) {
+  return (peerNames || []).slice(0, 3).flatMap((name) => [
+    `${name} subscribers paid memberships streaming`,
+    `${name} pricing plan monthly ad-supported`,
+  ]);
 }
 
 function claudeBaseSystem(inputs, expert) {

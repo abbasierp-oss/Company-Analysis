@@ -83,6 +83,8 @@ for (let i = 0; i < peerNames.length; i++) {
 const companyRow = companyRowFromAnchors();
 const peersWithCore = peers.filter((p) => peerRowHasCoreMetrics(p.metrics));
 const tablePublished = peerRowHasCoreMetrics(companyRow.metrics) && peersWithCore.length >= 2;
+const productEntities = [company, ...peerNames];
+const productComparison = buildProductPeerComparison(state, productEntities);
 let markdown;
 if (tablePublished) {
   const columns = ['Entity', 'Role', ...metricLabels];
@@ -98,6 +100,15 @@ if (tablePublished) {
     ...allRows.map((row) => `| ${row.name} | ${row.role} | ${metricLabels.map((m) => row.metrics[m]).join(' | ')} |`),
     '',
     'Interpretation: peer metrics are computed consistently from SEC EDGAR line items for the same annual period. Margins and ratios are derived only when all required inputs exist on company facts.',
+    ...(productComparison.markdown ? ['', productComparison.markdown] : []),
+  ].join('\n');
+} else if (productComparison.has_data) {
+  markdown = [
+    '## Section 3: Peer Comparison & Benchmarking',
+    '',
+    `Financial peer table withheld — only ${peersWithCore.length} of ${peers.length} peers had complete core FY${benchmarkFy} SEC metrics.`,
+    '',
+    productComparison.markdown,
   ].join('\n');
 } else {
   markdown = null;
@@ -108,13 +119,17 @@ state.peer_benchmarks = {
   selection_rule: inputPeers.length ? 'user_provided_peers' : 'industry_default_selection',
   benchmark_fy: benchmarkFy,
   table_published: tablePublished,
+  product_comparison_published: productComparison.has_data,
+  product_comparison: productComparison,
   peers,
   company_row: companyRow,
   markdown,
-  withhold_reason: tablePublished ? null : `Peer comparison omitted — only ${peersWithCore.length} of ${peers.length} peers had complete core FY${benchmarkFy} metrics from SEC filings.`,
+  withhold_reason: tablePublished || productComparison.has_data
+    ? null
+    : `Peer comparison omitted — only ${peersWithCore.length} of ${peers.length} peers had complete core FY${benchmarkFy} metrics from SEC filings and no product-level public signals were found.`,
 };
 state.sections = state.sections || {};
-if (tablePublished && markdown) {
+if (markdown) {
   state.sections.s3_benchmarks = markdown;
 } else {
   delete state.sections.s3_benchmarks;
@@ -125,7 +140,9 @@ state.audit_log.push({
   workflow_name: 'WF_PEER_BENCHMARKS',
   status: tablePublished ? 'OK' : 'WARN',
   message: tablePublished
-    ? `Peer table published with ${peersWithCore.length} complete peers on FY${benchmarkFy}.`
-    : `Peer table withheld (${peersWithCore.length}/${peers.length} peers with complete core metrics).`,
+    ? `Peer table published with ${peersWithCore.length} complete peers on FY${benchmarkFy}${productComparison.has_data ? ' plus product-level comparison.' : '.'}`
+    : productComparison.has_data
+      ? 'Product-level peer comparison published; financial peer table withheld.'
+      : `Peer table withheld (${peersWithCore.length}/${peers.length} peers with complete core metrics).`,
 });
 return [{ json: state }];
