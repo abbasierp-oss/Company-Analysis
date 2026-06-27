@@ -1,0 +1,330 @@
+{
+  "updatedAt": "2026-06-24T18:32:11.854Z",
+  "createdAt": "2026-06-24T10:33:26.090Z",
+  "id": "zlSPqKxywAPerZOQ",
+  "name": "DFA - WF_RESEARCH_PRIVATE",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Subworkflow Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "logic",
+      "name": "Build Private Research Bundle",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nconst company = state.inputs?.company_name || state.entity?.legal_name || '';\nconst industry = state.inputs?.industry || '';\nconst overridePeers = state.inputs?.advanced_context?.known_competitors || state.inputs?.advanced_context?.peers || [];\nstate.research = state.research || {};\nstate.research.private_research = {\n  source_status: {\n    sec_edgar: 'NO_PUBLIC_CIK_OR_NOT_PUBLIC',\n    serper: 'OPTIONAL_DISCOVERY_HELPER',\n    company_website: 'PUBLIC_SOURCE_PRIORITY',\n    company_ir_or_newsroom: 'PUBLIC_SOURCE_PRIORITY',\n    founder_source_urls: Object.keys(state.inputs?.advanced_context || {}).length ? 'AVAILABLE' : 'EMPTY',\n    apify_linkedin: 'DISABLED_NO_PAID_APIS',\n    apify_crunchbase: 'DISABLED_NO_PAID_APIS'\n  },\n  serper_jobs: [\n    { job_id: 'private_revenue_signal', query: `${company} annual revenue investor relations`, purpose: 'Find revenue disclosures, press mentions, or reliable estimates.', reliability_floor: 'LOW' },\n    { job_id: 'funding_valuation_signal', query: `${company} funding valuation Crunchbase PitchBook`, purpose: 'Find funding rounds, valuation signals, and investor disclosures.', reliability_floor: 'LOW' },\n    { job_id: 'headcount_growth_signal', query: `${company} LinkedIn employees headcount growth`, purpose: 'Find headcount scale and growth signals.', reliability_floor: 'LOW' },\n    { job_id: 'customer_product_signal', query: `${company} customers revenue press release ${industry}`, purpose: 'Find customer count, product traction, partnerships, or demand signals.', reliability_floor: 'LOW' },\n    { job_id: 'risk_event_signal', query: `${company} layoffs restructuring acquisition lawsuit leadership`, purpose: 'Find operational, legal, and leadership events.', reliability_floor: 'LOW' }\n  ],\n  public_page_jobs: [\n    { job_id: 'company_homepage_about', source_type: 'public_company_site', query_hint: `${company} about employees revenue customers`, output_fields: ['employee_count_if_stated', 'customer_count_if_stated', 'locations', 'business_description'], reliability_floor: 'LOW' },\n    { job_id: 'company_newsroom_press', source_type: 'public_company_site_or_newsroom', query_hint: `${company} press release funding revenue customers partnership`, output_fields: ['funding_if_publicly_stated', 'revenue_if_publicly_stated', 'customer_or_product_signals'], reliability_floor: 'LOW' },\n    { job_id: 'founder_provided_urls', source_type: 'manual_public_urls', query_hint: 'Use advanced_context.source_urls when provided.', output_fields: ['explicitly_cited_numbers_only'], reliability_floor: 'MEDIUM_IF_DIRECT_SOURCE' }\n  ],\n  peer_jobs: {\n    founder_override_peers: Array.isArray(overridePeers) ? overridePeers : [],\n    selection_rule: 'Use founder override peers first. If empty, choose 4-6 public peers by business model, customer segment, geography, and revenue model.',\n    metrics_rule: 'Only compute peer EV/Revenue or EV/EBITDA ranges if source data exists and the private-company denominator is source-labeled.'\n  },\n  estimate_policy: {\n    revenue: 'May be included only when source directly states revenue or enough explicit source-backed data supports a range. Otherwise N/A.',\n    valuation: 'Use funding valuation only when directly sourced; never infer from hype/news language.',\n    market_cap: 'Always N/A for private companies. Optional EV range only if clearly labeled as estimate.',\n    reliability: 'Private-company quantitative estimates are LOW or VERY_LOW by default. Never render as authoritative.'\n  },\n  normalized_output_requirements: [\n    'Every private company number must include source_name, source_url, source_date, confidence, and is_estimate=true.',\n    'Do not use paid private-company databases or paid scraping actors in the core path.',\n    'Unsupported estimates must become N/A with reason.',\n    'Claude agents must receive estimate labels visibly in the normalized bundle.'\n  ]\n};\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_RESEARCH_PRIVATE', status: 'READY', message: 'Private-company research jobs and reliability gates prepared. External fetches require Serper/Apify credentials.' });\nreturn [{ json: state }];"
+      }
+    },
+    {
+      "id": "serper_private_signals",
+      "name": "Serper Private Signal Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        520,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://google.serper.dev/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ q: ($json.research.private_research.serper_jobs || []).map(j => j.query).join(' OR '), num: 10 }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "2JT19Mz8usFvinDy",
+          "name": "DFA Serper API Key"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "attach_serper_private",
+      "name": "Attach Private Serper Signals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const state = $('Build Private Research Bundle').first().json;\nconst serper = $('Serper Private Signal Search').first().json || {};\nconst now = new Date().toISOString();\nconst organic = serper.organic || [];\nstate.research.private_research.serper_results = organic.slice(0, 10).map((item) => ({\n  title: item.title || '',\n  snippet: item.snippet || '',\n  source_url: item.link || '',\n  source_name: 'Serper Google Search',\n  source_date: now,\n  confidence: item.link ? 'LOW' : 'VERY_LOW',\n  is_estimate: true\n}));\nstate.research.private_research.source_status.serper = organic.length ? 'OK' : 'EMPTY_OR_FAILED';\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_RESEARCH_PRIVATE', status: organic.length ? 'OK' : 'WARN', message: `Attached ${organic.length} private-company Serper signal results.` });\nreturn [{ json: state }];"
+      }
+    }
+  ],
+  "connections": {
+    "Subworkflow Input": {
+      "main": [
+        [
+          {
+            "node": "Build Private Research Bundle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Private Research Bundle": {
+      "main": [
+        [
+          {
+            "node": "Serper Private Signal Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Serper Private Signal Search": {
+      "main": [
+        [
+          {
+            "node": "Attach Private Serper Signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Karachi",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "executionTimeout": 600,
+    "saveExecutionProgress": false
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": null,
+  "versionId": "2d8b4a73-299c-4a4b-a713-e8c82b2a84ed",
+  "activeVersionId": "2d8b4a73-299c-4a4b-a713-e8c82b2a84ed",
+  "versionCounter": 5,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "shared": [
+    {
+      "updatedAt": "2026-06-24T10:33:26.092Z",
+      "createdAt": "2026-06-24T10:33:26.092Z",
+      "role": "workflow:owner",
+      "workflowId": "zlSPqKxywAPerZOQ",
+      "projectId": "Y6XKo7DdXMDyiLAp",
+      "project": {
+        "updatedAt": "2026-05-14T06:40:01.596Z",
+        "createdAt": "2026-05-14T05:44:45.500Z",
+        "id": "Y6XKo7DdXMDyiLAp",
+        "name": "Abdullah  Dilshad <abdullah_dilshad@goevolo.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    }
+  ],
+  "tags": [
+    {
+      "updatedAt": "2026-06-24T11:25:52.602Z",
+      "createdAt": "2026-06-24T11:25:52.602Z",
+      "id": "PvqNmKlzG0X72TtP",
+      "name": "DFA Analyst System"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-06-24T11:08:13.580Z",
+    "createdAt": "2026-06-24T11:08:13.580Z",
+    "versionId": "2d8b4a73-299c-4a4b-a713-e8c82b2a84ed",
+    "workflowId": "zlSPqKxywAPerZOQ",
+    "nodes": [
+      {
+        "id": "trigger",
+        "name": "Subworkflow Input",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "inputSource": "passthrough"
+        }
+      },
+      {
+        "id": "logic",
+        "name": "Build Private Research Bundle",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          260,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const state = items[0]?.json?.state || items[0]?.json || {};\nconst now = new Date().toISOString();\nconst company = state.inputs?.company_name || state.entity?.legal_name || '';\nconst industry = state.inputs?.industry || '';\nconst overridePeers = state.inputs?.advanced_context?.known_competitors || state.inputs?.advanced_context?.peers || [];\nstate.research = state.research || {};\nstate.research.private_research = {\n  source_status: {\n    sec_edgar: 'NO_PUBLIC_CIK_OR_NOT_PUBLIC',\n    serper: 'OPTIONAL_DISCOVERY_HELPER',\n    company_website: 'PUBLIC_SOURCE_PRIORITY',\n    company_ir_or_newsroom: 'PUBLIC_SOURCE_PRIORITY',\n    founder_source_urls: Object.keys(state.inputs?.advanced_context || {}).length ? 'AVAILABLE' : 'EMPTY',\n    apify_linkedin: 'DISABLED_NO_PAID_APIS',\n    apify_crunchbase: 'DISABLED_NO_PAID_APIS'\n  },\n  serper_jobs: [\n    { job_id: 'private_revenue_signal', query: `${company} annual revenue investor relations`, purpose: 'Find revenue disclosures, press mentions, or reliable estimates.', reliability_floor: 'LOW' },\n    { job_id: 'funding_valuation_signal', query: `${company} funding valuation Crunchbase PitchBook`, purpose: 'Find funding rounds, valuation signals, and investor disclosures.', reliability_floor: 'LOW' },\n    { job_id: 'headcount_growth_signal', query: `${company} LinkedIn employees headcount growth`, purpose: 'Find headcount scale and growth signals.', reliability_floor: 'LOW' },\n    { job_id: 'customer_product_signal', query: `${company} customers revenue press release ${industry}`, purpose: 'Find customer count, product traction, partnerships, or demand signals.', reliability_floor: 'LOW' },\n    { job_id: 'risk_event_signal', query: `${company} layoffs restructuring acquisition lawsuit leadership`, purpose: 'Find operational, legal, and leadership events.', reliability_floor: 'LOW' }\n  ],\n  public_page_jobs: [\n    { job_id: 'company_homepage_about', source_type: 'public_company_site', query_hint: `${company} about employees revenue customers`, output_fields: ['employee_count_if_stated', 'customer_count_if_stated', 'locations', 'business_description'], reliability_floor: 'LOW' },\n    { job_id: 'company_newsroom_press', source_type: 'public_company_site_or_newsroom', query_hint: `${company} press release funding revenue customers partnership`, output_fields: ['funding_if_publicly_stated', 'revenue_if_publicly_stated', 'customer_or_product_signals'], reliability_floor: 'LOW' },\n    { job_id: 'founder_provided_urls', source_type: 'manual_public_urls', query_hint: 'Use advanced_context.source_urls when provided.', output_fields: ['explicitly_cited_numbers_only'], reliability_floor: 'MEDIUM_IF_DIRECT_SOURCE' }\n  ],\n  peer_jobs: {\n    founder_override_peers: Array.isArray(overridePeers) ? overridePeers : [],\n    selection_rule: 'Use founder override peers first. If empty, choose 4-6 public peers by business model, customer segment, geography, and revenue model.',\n    metrics_rule: 'Only compute peer EV/Revenue or EV/EBITDA ranges if source data exists and the private-company denominator is source-labeled.'\n  },\n  estimate_policy: {\n    revenue: 'May be included only when source directly states revenue or enough explicit source-backed data supports a range. Otherwise N/A.',\n    valuation: 'Use funding valuation only when directly sourced; never infer from hype/news language.',\n    market_cap: 'Always N/A for private companies. Optional EV range only if clearly labeled as estimate.',\n    reliability: 'Private-company quantitative estimates are LOW or VERY_LOW by default. Never render as authoritative.'\n  },\n  normalized_output_requirements: [\n    'Every private company number must include source_name, source_url, source_date, confidence, and is_estimate=true.',\n    'Do not use paid private-company databases or paid scraping actors in the core path.',\n    'Unsupported estimates must become N/A with reason.',\n    'Claude agents must receive estimate labels visibly in the normalized bundle.'\n  ]\n};\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_RESEARCH_PRIVATE', status: 'READY', message: 'Private-company research jobs and reliability gates prepared. External fetches require Serper/Apify credentials.' });\nreturn [{ json: state }];"
+        }
+      },
+      {
+        "id": "serper_private_signals",
+        "name": "Serper Private Signal Search",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          520,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://google.serper.dev/search",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "content-type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ q: ($json.research.private_research.serper_jobs || []).map(j => j.query).join(' OR '), num: 10 }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "responseFormat": "json"
+              }
+            }
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "2JT19Mz8usFvinDy",
+            "name": "DFA Serper API Key"
+          }
+        },
+        "onError": "continueRegularOutput",
+        "retryOnFail": true,
+        "maxTries": 2,
+        "waitBetweenTries": 1500,
+        "alwaysOutputData": true
+      },
+      {
+        "id": "attach_serper_private",
+        "name": "Attach Private Serper Signals",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          780,
+          0
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "language": "javaScript",
+          "jsCode": "const state = $('Build Private Research Bundle').first().json;\nconst serper = $('Serper Private Signal Search').first().json || {};\nconst now = new Date().toISOString();\nconst organic = serper.organic || [];\nstate.research.private_research.serper_results = organic.slice(0, 10).map((item) => ({\n  title: item.title || '',\n  snippet: item.snippet || '',\n  source_url: item.link || '',\n  source_name: 'Serper Google Search',\n  source_date: now,\n  confidence: item.link ? 'LOW' : 'VERY_LOW',\n  is_estimate: true\n}));\nstate.research.private_research.source_status.serper = organic.length ? 'OK' : 'EMPTY_OR_FAILED';\nstate.audit_log = state.audit_log || [];\nstate.audit_log.push({ timestamp: now, workflow_name: 'WF_RESEARCH_PRIVATE', status: organic.length ? 'OK' : 'WARN', message: `Attached ${organic.length} private-company Serper signal results.` });\nreturn [{ json: state }];"
+        }
+      }
+    ],
+    "connections": {
+      "Subworkflow Input": {
+        "main": [
+          [
+            {
+              "node": "Build Private Research Bundle",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Private Research Bundle": {
+        "main": [
+          [
+            {
+              "node": "Serper Private Signal Search",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Serper Private Signal Search": {
+        "main": [
+          [
+            {
+              "node": "Attach Private Serper Signals",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Abdullah  Dilshad",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-24T18:32:12.723Z",
+        "id": 180,
+        "workflowId": "zlSPqKxywAPerZOQ",
+        "versionId": "2d8b4a73-299c-4a4b-a713-e8c82b2a84ed",
+        "event": "activated",
+        "userId": "7e998078-0364-404e-9c2b-095ea38eeec9"
+      }
+    ]
+  }
+}
