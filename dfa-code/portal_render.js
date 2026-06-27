@@ -150,6 +150,38 @@ const html = `<!doctype html>
     function apiBase() { return window.location.origin + '/webhook'; }
     function setText(id, value) { document.getElementById(id).textContent = value || '-'; }
 
+    function statusUrlFor(runId) {
+      return apiBase() + '/dfa-production/status?run_id=' + encodeURIComponent(runId);
+    }
+
+    function resultUrlFor(runId) {
+      return apiBase() + '/dfa-production/result?run_id=' + encodeURIComponent(runId);
+    }
+
+    async function fetchJson(url, options, retries) {
+      const maxRetries = typeof retries === 'number' ? retries : 4;
+      let lastErr = null;
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const resp = await fetch(url, Object.assign({ cache: 'no-store' }, options || {}));
+          if (!resp.ok) {
+            const detail = await resp.text().catch(function() { return ''; });
+            throw new Error('HTTP ' + resp.status + (detail ? ': ' + detail.slice(0, 100) : ''));
+          }
+          const text = await resp.text();
+          if (!text) throw new Error('Empty response from server');
+          return JSON.parse(text);
+        } catch (err) {
+          lastErr = err;
+          if (attempt < maxRetries) {
+            await new Promise(function(r) { setTimeout(r, 1500 * (attempt + 1)); });
+            continue;
+          }
+        }
+      }
+      throw lastErr || new Error('Request failed');
+    }
+
     function copyText(value, label) {
       const text = value || '';
       if (!text) { alert('Nothing to copy yet.'); return; }
@@ -208,18 +240,30 @@ const html = `<!doctype html>
 
     document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
 
-    async function pollStatus(statusUrl, resultUrl) {
+    async function pollStatus(runId) {
+      let consecutiveFailures = 0;
       for (let i = 0; i < 180; i++) {
-        const status = await (await fetch(statusUrl)).json();
-        const pct = status.progress_pct || 0;
-        document.getElementById('progressBar').style.width = Math.max(8, pct) + '%';
-        document.getElementById('progressLabel').textContent = (status.progress_label || status.current_stage || 'running') + (pct ? ' (' + pct + '%)' : '');
-        outputStatus.textContent = status.message || ('Run ' + (status.run_id || '') + ' is ' + (status.status || 'running'));
-        if (status.status === 'completed' || status.status === 'completed_with_warnings') {
-          return await (await fetch(resultUrl)).json();
+        try {
+          const status = await fetchJson(statusUrlFor(runId), { method: 'GET' }, 3);
+          consecutiveFailures = 0;
+          const pct = status.progress_pct || 0;
+          document.getElementById('progressBar').style.width = Math.max(8, pct) + '%';
+          document.getElementById('progressLabel').textContent = (status.progress_label || status.current_stage || 'running') + (pct ? ' (' + pct + '%)' : '');
+          outputStatus.textContent = status.message || ('Run ' + (status.run_id || runId) + ' is ' + (status.status || 'running'));
+          if (status.status === 'completed' || status.status === 'completed_with_warnings') {
+            return await fetchJson(resultUrlFor(runId), { method: 'GET' }, 4);
+          }
+          if (status.status === 'failed') throw new Error(status.message || 'Run failed.');
+        } catch (err) {
+          consecutiveFailures++;
+          if (consecutiveFailures >= 12) {
+            throw new Error((err && err.message) || 'Lost connection while checking run status. Save your run ID and try the result URL later.');
+          }
+          outputStatus.textContent = 'Temporary connection issue while the analysis runs. Retrying status check (' + consecutiveFailures + '/12)...';
+          await new Promise(function(r) { setTimeout(r, 4000); });
+          continue;
         }
-        if (status.status === 'failed') throw new Error(status.message || 'Run failed.');
-        await new Promise((r) => setTimeout(r, 5000));
+        await new Promise(function(r) { setTimeout(r, 8000); });
       }
       throw new Error('Run still processing. Save your run ID and open the result URL later.');
     }
@@ -240,19 +284,18 @@ const html = `<!doctype html>
       beginRunUi(payload.company_name);
 
       try {
-        const startResp = await fetch(apiBase() + '/dfa-production/start', {
+        const accepted = await fetchJson(apiBase() + '/dfa-production/start', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(payload),
-        });
-        const accepted = await startResp.json();
+        }, 3);
         if (!accepted.accepted) throw new Error(accepted.message || accepted.next_question || 'Required input missing.');
 
         setText('runId', accepted.run_id);
         setText('runStatus', accepted.status || 'queued');
         setText('expert', accepted.expert_resolved && (accepted.expert_resolved.name + ' - ' + accepted.expert_resolved.reason));
 
-        const data = await pollStatus(accepted.status_url, accepted.result_url);
+        const data = await pollStatus(accepted.run_id);
         latest = data;
         const freshness = data.data_freshness || {};
         const market = data.market_data || {};
@@ -278,7 +321,9 @@ const html = `<!doctype html>
         outputStatus.textContent = 'Run blocked or failed: ' + (err.message || String(err));
         outputStatus.className = 'status-line small bad';
         showPromptBox('', '');
-        promptOutput.textContent = 'The run did not complete. Your form entries are still filled in above. Fix any issues and try again.\\n\\nError: ' + (err.message || String(err));
+        const savedRunId = document.getElementById('runId').textContent;
+        const runHint = savedRunId && savedRunId !== '-' ? ('\\n\\nRun ID: ' + savedRunId + '\\nStatus URL: ' + statusUrlFor(savedRunId) + '\\nResult URL: ' + resultUrlFor(savedRunId)) : '';
+        promptOutput.textContent = 'The run did not complete. Your form entries are still filled in above. Fix any issues and try again.\\n\\nError: ' + (err.message || String(err)) + runHint;
         copyPromptBtn.disabled = true;
       } finally {
         runBtn.disabled = false;

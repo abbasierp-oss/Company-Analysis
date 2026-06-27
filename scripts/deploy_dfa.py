@@ -62,6 +62,26 @@ def set_node_code(wf, node_name, code):
     raise KeyError(node_name)
 
 
+CORS_HEADERS = [
+    {'name': 'Access-Control-Allow-Origin', 'value': '*'},
+    {'name': 'Access-Control-Allow-Methods', 'value': 'GET, POST, OPTIONS'},
+    {'name': 'Access-Control-Allow-Headers', 'value': 'Content-Type'},
+]
+
+
+def set_respond_cors(wf, node_name):
+    for n in wf['nodes']:
+        if n['name'] == node_name:
+            opts = n['parameters'].setdefault('options', {})
+            rh = opts.setdefault('responseHeaders', {'entries': []})
+            existing = {e['name'] for e in rh.get('entries', [])}
+            for entry in CORS_HEADERS:
+                if entry['name'] not in existing:
+                    rh['entries'].append(entry)
+            return
+    raise KeyError(node_name)
+
+
 def claude_node(node_id, name, pos, json_expr):
     return {
         'id': node_id,
@@ -512,6 +532,7 @@ return [{ json: {
     : 'No run found for the supplied run_id.',
 } }];"""
     set_node_code(wf, 'Build Status Response', status_code)
+    set_respond_cors(wf, 'Return Status JSON')
 
 
 def patch_result_api(wf):
@@ -538,6 +559,7 @@ return [{ json: {
   message: row?.run_id ? 'Result found.' : 'No result found for the supplied run_id.',
 } }];"""
     set_node_code(wf, 'Build Result Response', result_code)
+    set_respond_cors(wf, 'Return Result JSON')
 
 
 def validate_portal_html(portal_js):
@@ -619,6 +641,7 @@ const state = {
 };
 return [{ json: state }];"""
     set_node_code(wf, 'Initialize Accepted Run', init)
+    set_respond_cors(wf, 'Return Production Result')
 
 
 def patch_approval(wf):
