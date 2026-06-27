@@ -409,9 +409,10 @@ const state = {
     expert_resolved: body.expert_resolved || null,
     service_provider: body.service_provider || body.my_company || 'MY COMPANY',
     peer_list,
+    it_initiatives: Array.isArray(body.it_initiatives) ? body.it_initiatives : parseInitiativeList(body.it_initiatives || ''),
     slide_count: slideCount,
     human_review: Boolean(body.human_review),
-    advanced_context: { source_notes: body.source_notes || body.notes || body.urls || '', peers: peer_list },
+    advanced_context: { source_notes: body.source_notes || body.notes || body.urls || '', peers: peer_list, it_initiatives: body.it_initiatives || [] },
   },
   entity: null,
   research: {},
@@ -573,6 +574,9 @@ return [{ json: {
   delivery: state?.delivery || {},
   approval: state?.approval || {},
   audit_log: (state?.audit_log || []).slice(-12),
+  dashboard: (() => { try { return buildPortalDashboard(state || {}); } catch (e) { return { error: String(e.message || e) }; } })(),
+  it_initiatives: state?.it_initiatives || [],
+  recommendations: state?.executive_proposal?.priorities || [],
   message: row?.run_id ? 'Result found.' : 'No result found for the supplied run_id.',
 } }];"""
     set_node_code(wf, 'Build Result Response', result_code)
@@ -624,6 +628,8 @@ const expertPref = clean(body.expert_pref || body.expert || body.industry_expert
 const serviceProvider = clean(body.service_provider || body.my_company || body.provider_company) || 'MY COMPANY';
 const peerListRaw = body.peer_list || body.peers || '';
 const peer_list = Array.isArray(peerListRaw) ? peerListRaw : String(peerListRaw || '').split(/[,;\\n|]/).map((s) => s.trim()).filter(Boolean);
+const itInitiativesRaw = body.it_initiatives || body.it_initiative_list || body.initiative_roadmap || '';
+const it_initiatives = Array.isArray(itInitiativesRaw) ? itInitiativesRaw : String(itInitiativesRaw || '').split(/[,;\\n|]/).map((s) => s.trim()).filter(Boolean);
 const expertLibrary = {
   'media': { name: 'Ben Thompson', reason: 'aggregation theory and distribution power' },
   'gaming': { name: 'Matthew Ball', reason: 'gaming platforms and interactive media economics' },
@@ -654,7 +660,7 @@ const state = {
   status: 'queued',
   current_stage: 'queued',
   conversation_complete: true,
-  inputs: { company_name: companyName, ticker, exec_type: execType, industry, expert_pref: expertPref, expert_resolved: expertResolved, service_provider: serviceProvider, peer_list, human_review: Boolean(body.human_review) },
+  inputs: { company_name: companyName, ticker, exec_type: execType, industry, expert_pref: expertPref, expert_resolved: expertResolved, service_provider: serviceProvider, peer_list, it_initiatives, source_notes: clean(body.source_notes || ''), human_review: Boolean(body.human_review) },
 };
 return [{ json: state }];"""
     set_node_code(wf, 'Initialize Accepted Run', init)
