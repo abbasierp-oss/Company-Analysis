@@ -45,6 +45,9 @@ if (!state.sections.s2_quarterly && state.financial_snapshot?.quarterly?.markdow
 if (!state.sections.s2_annual && state.financial_snapshot?.annual?.markdown) {
   state.sections.s2_annual = state.financial_snapshot.annual.markdown;
 }
+if (!state.sections.s2_three_year_revenue && state.financial_snapshot?.three_year_revenue?.markdown) {
+  state.sections.s2_three_year_revenue = state.financial_snapshot.three_year_revenue.markdown;
+}
 if (!state.sections.s2_market_data && state.financial_snapshot?.market_data?.markdown) {
   state.sections.s2_market_data = state.financial_snapshot.market_data.markdown;
 }
@@ -66,7 +69,7 @@ if (!state.sections.s2_market_data) {
   ].join('\n');
 }
 
-if (!state.peer_benchmarks?.table_published) {
+if (!state.peer_benchmarks?.markdown) {
   delete state.sections.s3_benchmarks;
 }
 
@@ -92,13 +95,13 @@ state.sections.s8_assumptions = state.sections.s8_assumptions || [
 ].join('\n');
 
 const baseSectionOrder = [
-  's1_source_pack', 's2_quarterly', 's2_annual', 's2_market_data',
+  's1_source_pack', 's2_quarterly', 's2_annual', 's2_three_year_revenue', 's2_market_data',
   's3_benchmarks', 's4_insights', 's5_ratios', 's6_proposal',
   's7_rtbl', 's8_assumptions', 's9_sales',
 ];
 const sectionOrder = baseSectionOrder.filter((id) => {
   if (id === 's3_benchmarks') {
-    return Boolean(state.peer_benchmarks?.markdown && (state.peer_benchmarks?.table_published || state.peer_benchmarks?.product_comparison_published));
+    return Boolean(state.peer_benchmarks?.markdown);
   }
   return Boolean(state.sections[id]);
 });
@@ -125,9 +128,10 @@ const citationQa = {
   financial_snapshot_ready: Boolean(state.financial_snapshot?.quarterly?.rows?.length || state.sections.s2_quarterly),
   quarterly_table_ready: Boolean(state.financial_snapshot?.quarterly?.rows?.length),
   annual_table_ready: Boolean(state.financial_snapshot?.annual?.rows?.length),
+  three_year_revenue_ready: Boolean(state.financial_snapshot?.three_year_revenue?.has_data || state.sections.s2_three_year_revenue),
   market_data_separated: Boolean(state.financial_snapshot?.market_data?.rows?.length || state.sections.s2_market_data),
   ratio_dashboard_ready: Boolean(state.ratio_dashboard?.annual?.length || state.sections.s5_ratios),
-  peer_benchmark_ready: Boolean(state.peer_benchmarks?.table_published),
+  peer_benchmark_ready: Boolean(state.peer_benchmarks?.markdown),
   value_realization_ready: Boolean(state.sections.s9_sales),
   proposal_ready: Boolean(state.sections.s6_proposal),
   presentation_prompt_ready: Boolean(state.presentation_prompt?.prompt_text),
@@ -136,7 +140,8 @@ const citationQa = {
   gap_count: aggregateReportGaps(state).length,
   warning_notes: [],
 };
-if (!citationQa.peer_benchmark_ready) citationQa.warning_notes.push('Peer comparison omitted — core FY peer metrics not populated consistently across entities.');
+if (!citationQa.three_year_revenue_ready) citationQa.warning_notes.push('3-year 10-K revenue section missing or incomplete.');
+if (!citationQa.peer_benchmark_ready) citationQa.warning_notes.push('Peer comparison section missing.');
 if (!citationQa.data_freshness_recorded) citationQa.warning_notes.push('Data freshness stamp missing.');
 if (!citationQa.filing_anchors_recorded) citationQa.warning_notes.push('Filing anchors missing.');
 if ((state.normalized?.gaps || []).length > 8) citationQa.warning_notes.push('High gap count — verify issuer profile and SEC form coverage.');

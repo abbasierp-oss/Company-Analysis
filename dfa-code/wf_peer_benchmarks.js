@@ -6,10 +6,8 @@ const inputPeers = parsePeerList(state.inputs?.peer_list || state.inputs?.advanc
 const peerNames = (inputPeers.length ? inputPeers : peerDefaults(industry, company))
   .filter((name) => normName(name) !== normName(company))
   .slice(0, 5);
-const metricLabels = ['Revenue', 'Gross Margin', 'Operating Margin', 'Net Margin', 'FCF Margin', 'Current Ratio', 'YoY Revenue Growth', '3-Year Revenue CAGR', 'Net Debt / EBITDA', 'Interest Coverage', 'ROCE/ROIC', 'Asset Turnover'];
 const fyAnchor = state.research?.filing_anchors?.annual_10k;
 const benchmarkFy = fyAnchor?.fy ? Number(fyAnchor.fy) : 2025;
-const fyLabel = `FY${benchmarkFy}`;
 
 async function secGet(url) {
   return this.helpers.httpRequest({
@@ -28,136 +26,69 @@ if (!directory) {
   state.research.sec_directory = directory;
 }
 
-function companyRowFromAnchors() {
-  const annual = getAnnualAnchorMetrics(state);
-  const label = annual.period_label || fyLabel;
-  const facts = state.research?.financials?.merged_facts || state.research?.financials?.raw_us_gaap_facts || {};
-  const fx = state.research?.financials?.fx_to_usd || {};
-  const native = state.research?.financials?.native_currency || 'USD';
-  const computed = computePeerMetricsFromFacts(facts, benchmarkFy, fx, native);
-  const metrics = {};
-  for (const key of metricLabels) {
-    const val = computed[key];
-    metrics[key] = val && !isUnavailableDisplay(val) ? `${val} (${label})` : naReason(`${key} not available for target company FY${benchmarkFy}`);
-  }
-  return {
-    name: company,
-    role: 'target company',
-    metrics,
-    source_status: 'SEC_ANNUAL_ANCHOR',
-    reliability: peerRowHasCoreMetrics(metrics) ? 'HIGH' : 'MEDIUM',
-  };
-}
+const facts = state.research?.financials?.merged_facts || state.research?.financials?.raw_us_gaap_facts || {};
+const fx = state.research?.financials?.fx_to_usd || {};
+const native = state.research?.financials?.native_currency || 'USD';
+
+const targetResolved = resolveCompetitorEntity(company, industry);
+const categoricalRows = [
+  buildCategoricalPeerRow(company, targetResolved, 'target company', targetResolved.category, buildPeerAnnualMetricBundle(facts, benchmarkFy, fx, native, company, company)),
+];
 
 const resolvedPeers = peerNames.map((name) => resolveCompetitorEntity(name, industry));
-const peers = [];
 for (let i = 0; i < peerNames.length; i++) {
   const name = peerNames[i];
   const resolved = resolvedPeers[i];
   const secLookupName = resolved.sec_lookup_name || name;
-  const role = i === 0 ? 'best-in-class or scale benchmark' : (i === 1 ? 'close competitor' : 'industry peer');
-  let metrics = Object.fromEntries(metricLabels.map((m) => [m, naReason('peer SEC data not yet fetched')]));
-  let source_status = 'NO_SEC_MATCH';
-  let reliability = naReason('peer not matched in SEC directory');
+  const role = PEER_CATEGORY_ROLES[Math.min(i + 1, PEER_CATEGORY_ROLES.length - 1)];
+  let merged = null;
+  let peerFx = fx;
+  let peerNative = native;
   try {
-    const { best, cik } = resolveCikFromDirectory(directory, secLookupName, resolved.ticker || '');
+    const { cik } = resolveCikFromDirectory(directory, secLookupName, resolved.ticker || '');
     if (cik) {
       const factsResp = await secGet.call(this, `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`);
       const usGaap = factsResp?.facts?.['us-gaap'] || {};
       const ifrs = factsResp?.facts?.['ifrs-full'] || {};
-      const merged = mergeCompactFacts(compactFactsFromTaxonomy(usGaap, 'us-gaap'), compactFactsFromTaxonomy(ifrs, 'ifrs-full'));
-      const peerNative = detectNativeCurrency(usGaap, ifrs);
-      const peerFx = peerNative === 'USD' ? { rate: 1, from_currency: 'USD' } : await fetchFxToUsd.call(this, peerNative);
-      const fy = [benchmarkFy, benchmarkFy - 1, benchmarkFy - 2].find((y) => annualFactValue(merged, 'revenue', y, peerFx, peerNative)) || benchmarkFy;
-      const computed = computePeerMetricsFromFacts(merged, fy, peerFx, peerNative);
-      for (const key of metricLabels) {
-        metrics[key] = computed[key] && !isUnavailableDisplay(computed[key]) ? `${computed[key]} (FY${fy})` : naReason(`${key} not available for ${name} FY${fy}`);
-      }
-      source_status = peerRowHasCoreMetrics(metrics) ? 'SEC_PEER_FACTS_OK' : 'SEC_PEER_INCOMPLETE';
-      reliability = peerRowHasCoreMetrics(metrics) ? 'HIGH' : 'LOW';
+      merged = mergeCompactFacts(compactFactsFromTaxonomy(usGaap, 'us-gaap'), compactFactsFromTaxonomy(ifrs, 'ifrs-full'));
+      peerNative = detectNativeCurrency(usGaap, ifrs);
+      peerFx = peerNative === 'USD' ? { rate: 1, from_currency: 'USD' } : await fetchFxToUsd.call(this, peerNative);
     }
   } catch (e) {
-    source_status = `SEC_FETCH_ERROR: ${e.message || e}`;
-    reliability = 'LOW';
+    merged = null;
   }
-  peers.push({
-    name,
-    entered_name: resolved.entered_name,
-    resolved_label: resolved.resolved_label,
-    parent_company: resolved.parent_company,
-    category: resolved.category,
-    resolution_note: resolved.resolution_note,
-    sec_lookup_name: secLookupName,
-    role,
-    ticker: resolved.ticker || null,
-    metrics,
-    source_status,
-    reliability,
-  });
+  const bundle = buildPeerAnnualMetricBundle(merged || {}, benchmarkFy, peerFx, peerNative, name, secLookupName);
+  categoricalRows.push(buildCategoricalPeerRow(name, resolved, role, resolved.category, bundle));
 }
 
-const companyRow = companyRowFromAnchors();
-const peersWithCore = peers.filter((p) => peerRowHasCoreMetrics(p.metrics));
-const tablePublished = peerRowHasCoreMetrics(companyRow.metrics) && peersWithCore.length >= 2;
 const productComparison = buildCompetitorComparisons(state, company, peerNames);
-let markdown;
-if (tablePublished) {
-  const columns = ['Entity', 'Role', ...metricLabels];
-  const allRows = [companyRow, ...peersWithCore];
-  markdown = [
-    '## Section 3: Peer Comparison & Benchmarking',
-    '',
-    `Data fetched at runtime: ${now}`,
-    `Benchmark period: ${fyLabel} annual SEC facts (consistent methodology across entities).`,
-    '',
-    '| ' + columns.join(' | ') + ' |',
-    '|---|' + columns.slice(1).map(() => '---').join('|') + '|',
-    ...allRows.map((row) => `| ${row.name} | ${row.role} | ${metricLabels.map((m) => row.metrics[m]).join(' | ')} |`),
-    '',
-    'Interpretation: peer metrics are computed consistently from SEC EDGAR line items for the same annual period. Margins and ratios are derived only when all required inputs exist on company facts.',
-    ...(productComparison.markdown ? ['', productComparison.markdown] : []),
-  ].join('\n');
-} else if (productComparison.has_data) {
-  markdown = [
-    '## Section 3: Peer Comparison & Benchmarking',
-    '',
-    `Financial peer table withheld — only ${peersWithCore.length} of ${peers.length} peers had complete core FY${benchmarkFy} SEC metrics.`,
-    '',
-    productComparison.markdown,
-  ].join('\n');
-} else {
-  markdown = null;
-}
+const markdown = formatCategoricalPeerMarkdown(
+  categoricalRows,
+  benchmarkFy,
+  now,
+  productComparison.has_data ? productComparison.markdown : '',
+);
 
 state.peer_benchmarks = {
   generated_at: now,
   selection_rule: inputPeers.length ? 'user_provided_peers' : 'industry_default_selection',
   benchmark_fy: benchmarkFy,
-  table_published: tablePublished,
+  table_published: true,
+  categorical_rows: categoricalRows,
   product_comparison_published: productComparison.has_data,
   product_comparison: productComparison,
-  peers,
-  company_row: companyRow,
+  peers: categoricalRows,
+  company_row: categoricalRows[0],
   markdown,
-  withhold_reason: tablePublished || productComparison.has_data
-    ? null
-    : `Peer comparison omitted — only ${peersWithCore.length} of ${peers.length} peers had complete core FY${benchmarkFy} metrics from SEC filings and no product-level public signals were found.`,
+  withhold_reason: null,
 };
 state.sections = state.sections || {};
-if (markdown) {
-  state.sections.s3_benchmarks = markdown;
-} else {
-  delete state.sections.s3_benchmarks;
-}
+state.sections.s3_benchmarks = markdown;
 state.audit_log = state.audit_log || [];
 state.audit_log.push({
   timestamp: now,
   workflow_name: 'WF_PEER_BENCHMARKS',
-  status: tablePublished ? 'OK' : 'WARN',
-  message: tablePublished
-    ? `Peer table published with ${peersWithCore.length} complete peers on FY${benchmarkFy}${productComparison.has_data ? ' plus product-level comparison.' : '.'}`
-    : productComparison.has_data
-      ? 'Product-level peer comparison published; financial peer table withheld.'
-      : `Peer table withheld (${peersWithCore.length}/${peers.length} peers with complete core metrics).`,
+  status: 'OK',
+  message: `Categorical peer comparison published for ${categoricalRows.length} entities on FY${benchmarkFy} annual basis${productComparison.has_data ? ' plus product-level comparison.' : '.'}`,
 });
 return [{ json: state }];

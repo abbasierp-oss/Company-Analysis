@@ -101,11 +101,23 @@ function buildPortalDashboard(state) {
     metrics.push({ id: 'market_cap', label: 'Market Cap', display: fmtUsdValue(market.market_cap_usd), value: market.market_cap_usd, kind: 'usd' });
   }
 
-  const peerBars = peers.slice(0, 3).map((peer) => {
-    const op = peer.metrics?.['Operating Margin'] || peer.metrics?.['Op Margin'] || 'N/A';
-    const rev = peer.metrics?.Revenue || 'N/A';
-    return { name: peer.name, operating_margin: op, revenue: rev, role: peer.role || 'peer' };
-  });
+  const peerRows = state.peer_benchmarks?.categorical_rows || state.peer_benchmarks?.peers || [];
+  const peerBars = peerRows.filter((p) => p.role !== 'target company').slice(0, 3).map((peer) => ({
+    name: peer.company_name || peer.name || peer.entered_name,
+    operating_margin: peer.operating_margin || peer.metrics?.['Operating Margin'] || 'N/A',
+    revenue: peer.latest_annual_revenue || peer.metrics?.Revenue || 'N/A',
+    role: peer.role || 'peer',
+  }));
+  if (!peerBars.length) {
+    peerRows.slice(0, 3).forEach((peer) => {
+      peerBars.push({
+        name: peer.company_name || peer.name,
+        operating_margin: peer.operating_margin || 'N/A',
+        revenue: peer.latest_annual_revenue || 'N/A',
+        role: peer.role || 'peer',
+      });
+    });
+  }
 
   return {
     company: companyDisplayName(state.entity, state.inputs),
@@ -114,7 +126,7 @@ function buildPortalDashboard(state) {
     initiatives,
     recommendations: linked,
     peer_comparison: {
-      published: state.peer_benchmarks?.table_published === true,
+      published: Boolean(state.peer_benchmarks?.markdown),
       benchmark_fy: state.peer_benchmarks?.benchmark_fy || null,
       target: targetPeer ? { name: targetPeer.name, metrics: targetPeer.metrics } : null,
       peers: peerBars,

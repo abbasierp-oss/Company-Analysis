@@ -6,7 +6,7 @@ const q = getQuarterlyAnchorMetrics(state);
 const period = q.period_label || 'Quarterly anchor';
 const qForm = state.data_freshness?.quarterly_anchor_form || '10-Q';
 const market = state.research?.market_data || {};
-const peerPublished = state.peer_benchmarks?.table_published === true;
+const peerPublished = Boolean(state.peer_benchmarks?.markdown);
 const company = state.entity?.legal_name || state.inputs?.company_name || 'Company';
 const initiatives = extractITInitiatives(state);
 

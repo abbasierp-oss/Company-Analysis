@@ -143,11 +143,19 @@ function formatAnnualMetric(metric, kind) {
 function aggregateReportGaps(state) {
   const gaps = [...(state.normalized?.gaps || [])];
   const ts = new Date().toISOString();
-  if (state.peer_benchmarks && !state.peer_benchmarks.table_published) {
+  if (state.peer_benchmarks && !state.peer_benchmarks.markdown) {
     gaps.push({
       metric: 'peer_benchmarks',
-      reason: state.peer_benchmarks.withhold_reason || 'Peer comparison omitted — core FY peer metrics incomplete across entities.',
+      reason: 'Peer comparison section missing from report assembly.',
       source: 'WF_PEER_BENCHMARKS',
+      timestamp: ts,
+    });
+  }
+  if (!state.financial_snapshot?.three_year_revenue?.has_data && !state.sections?.s2_three_year_revenue) {
+    gaps.push({
+      metric: 'three_year_revenue_10k',
+      reason: '3-Year Revenue From 10-Ks section missing or has no filing-backed annual revenue rows.',
+      source: 'WF_FINANCIAL_SNAPSHOT',
       timestamp: ts,
     });
   }

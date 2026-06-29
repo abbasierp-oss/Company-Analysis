@@ -259,10 +259,14 @@ const markdownQuarterlyWithNotes = [
   ...(unusualLines.length ? ['', '### Unusual quarter items (GAAP)', ...unusualLines, '', 'All figures above are GAAP from SEC filings unless noted. Non-GAAP/adjusted metrics are not shown in this table.'] : []),
 ].join('\n');
 
+const threeYearRevenue = buildThreeYearRevenueFrom10K(state);
+
 const markdown = [
   markdownQuarterlyWithNotes,
   '',
   markdownAnnual,
+  '',
+  threeYearRevenue.markdown,
   '',
   markdownMarket,
   '',
@@ -278,12 +282,14 @@ state.financial_snapshot = {
   filing_anchors: anchors,
   quarterly: { anchor: qAnchor, period_label: qPeriodLabel, rows: quarterlyRows, markdown: markdownQuarterlyWithNotes },
   annual: { anchor: fyAnchor, period_label: fyPeriodLabel, rows: annualRows, markdown: markdownAnnual },
+  three_year_revenue: threeYearRevenue,
   market_data: { markdown: markdownMarket },
   markdown,
 };
 state.sections = state.sections || {};
 state.sections.s2_quarterly = markdownQuarterlyWithNotes;
 state.sections.s2_annual = markdownAnnual;
+state.sections.s2_three_year_revenue = threeYearRevenue.markdown;
 state.sections.s2_market_data = markdownMarket;
 state.sections.s2_snapshot = markdown;
 state.audit_log = state.audit_log || [];
@@ -291,6 +297,6 @@ state.audit_log.push({
   timestamp: now,
   workflow_name: 'WF_FINANCIAL_SNAPSHOT',
   status: 'OK',
-  message: `Financial snapshot: quarterly ${qPeriodLabel}, annual ${fyPeriodLabel}, market data separated.`,
+  message: `Financial snapshot: quarterly ${qPeriodLabel}, annual ${fyPeriodLabel}, 3-year 10-K revenue, market data separated.`,
 });
 return [{ json: state }];

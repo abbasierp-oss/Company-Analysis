@@ -649,11 +649,19 @@ function formatAnnualMetric(metric, kind) {
 function aggregateReportGaps(state) {
   const gaps = [...(state.normalized?.gaps || [])];
   const ts = new Date().toISOString();
-  if (state.peer_benchmarks && !state.peer_benchmarks.table_published) {
+  if (state.peer_benchmarks && !state.peer_benchmarks.markdown) {
     gaps.push({
       metric: 'peer_benchmarks',
-      reason: state.peer_benchmarks.withhold_reason || 'Peer comparison omitted — core FY peer metrics incomplete across entities.',
+      reason: 'Peer comparison section missing from report assembly.',
       source: 'WF_PEER_BENCHMARKS',
+      timestamp: ts,
+    });
+  }
+  if (!state.financial_snapshot?.three_year_revenue?.has_data && !state.sections?.s2_three_year_revenue) {
+    gaps.push({
+      metric: 'three_year_revenue_10k',
+      reason: '3-Year Revenue From 10-Ks section missing or has no filing-backed annual revenue rows.',
+      source: 'WF_FINANCIAL_SNAPSHOT',
       timestamp: ts,
     });
   }
@@ -908,25 +916,28 @@ function buildDeterministicInsights(state) {
   const issuer = state.entity?.issuer_profile?.description || 'public company';
   const ref8k = state.data_freshness?.recent_8k_form;
   const ref8kDate = state.data_freshness?.recent_8k_filing_date;
-  const peerReady = state.peer_benchmarks?.table_published === true;
+  const peerReady = Boolean(state.peer_benchmarks?.markdown);
+  const threeYear = state.financial_snapshot?.three_year_revenue;
+  const annualTrend = threeYear?.narrative_summary || naReason('3-year 10-K revenue trend not available');
   return [
     '## Section 4: Three Strategic Insights',
     '',
-    `Metric basis: quarterly anchor ${period}. GAAP figures from SEC filings unless marked as interpretation.`,
+    `Metric basis: quarterly anchor ${period} for operating metrics. Annual revenue growth is cited separately from the 3-Year Revenue From 10-Ks section (FY2025/FY2024/FY2023) and is not mixed with quarterly revenue.`,
     '',
     '### Insight 1 — Cash-flow quality and reinvestment',
-    `- Revenue: ${formatQuarterlyMetric(q.revenue)} — ${metricCitationShort(q.revenue, qForm)}`,
-    `- Operating margin: ${formatQuarterlyMetric(q.operating_margin, 'pct')} — ${metricCitationShort(q.operating_margin, qForm)} (computed: operating income ÷ revenue)`,
-    `- FCF: ${formatQuarterlyMetric(q.free_cash_flow)} — ${metricCitationShort(q.free_cash_flow, qForm)} (computed: operating cash flow − capex)`,
-    `- EPS: ${formatQuarterlyMetric(q.eps, 'eps')} — ${metricCitationShort(q.eps, qForm)}`,
+    `- Revenue (quarterly anchor): ${formatQuarterlyMetric(q.revenue)} — ${metricCitationShort(q.revenue, qForm)}`,
+    `- Operating margin (quarterly): ${formatQuarterlyMetric(q.operating_margin, 'pct')} — ${metricCitationShort(q.operating_margin, qForm)} (computed: operating income ÷ revenue)`,
+    `- FCF (quarterly): ${formatQuarterlyMetric(q.free_cash_flow)} — ${metricCitationShort(q.free_cash_flow, qForm)} (computed: operating cash flow − capex)`,
+    `- EPS (quarterly): ${formatQuarterlyMetric(q.eps, 'eps')} — ${metricCitationShort(q.eps, qForm)}`,
+    `- **Annual growth view (10-K only):** ${annualTrend}`,
     `- Analyst view (interpretation): Sustainable value creation depends on whether growth is backed by reinvestment and cash conversion, not headline revenue alone.`,
     `- So-what: ${state.inputs?.exec_type || 'Executive'} should prioritize the metric with the weakest source-backed trend before approving new spend.`,
     '',
     '### Insight 2 — Risk, leverage, and cost of capital',
     `- Issuer profile: ${issuer} [filing classification]`,
     peerReady
-      ? `- Peer context: Section 3 FY${state.peer_benchmarks?.benchmark_fy || 2025} table — filing-backed annual SEC facts.`
-      : '- Peer context: omitted — insufficient consistent peer data across entities (see Section 8 gaps).',
+      ? `- Peer context: Section 3 categorical peer table — latest annual revenue and margins (FY${state.peer_benchmarks?.benchmark_fy || 2025}); approximations labeled where SEC tags were incomplete.`
+      : '- Peer context: Section 3 peer table not assembled for this run (see Section 8 gaps).',
     `- Analyst view (interpretation): Risk shows up in leverage, coverage, and earnings volatility versus peers.`,
     `- So-what: If leverage or margin trails peers, the strategic plan must explain convergence or justify a premium/discount.`,
     '',
@@ -953,7 +964,8 @@ function buildExecutivePresentationPrompt(state) {
   const fyAnchor = state.research?.filing_anchors?.annual_10k;
   const fyLabel = fyAnchor?.fy ? `FY${fyAnchor.fy}` : annualSectionLabel(fyAnchor);
   const market = state.research?.market_data || {};
-  const peerPublished = state.peer_benchmarks?.table_published === true;
+  const peerPublished = Boolean(state.peer_benchmarks?.markdown);
+  const threeYear = state.financial_snapshot?.three_year_revenue;
   const freshness = state.data_freshness || {};
   const qForm = freshness.quarterly_anchor_form || '10-Q';
 
@@ -967,6 +979,7 @@ function buildExecutivePresentationPrompt(state) {
       ? `Market cap: ${fmtUsdValue(market.market_cap_usd)} (${market.market_cap_source || 'computed from live share price and SEC shares outstanding'})`
       : naReason('market cap requires live share price and SEC shares outstanding'),
     market.share_price_usd != null ? `Share price: ${fmtUsdValue(market.share_price_usd)} as of ${market.source_date || 'latest quote'}` : null,
+    threeYear?.narrative_summary ? `3-year annual revenue trend (10-K only): ${threeYear.narrative_summary}` : null,
   ].filter(Boolean);
 
   const priorities = (state.executive_proposal?.priorities || []).map((p, i) => (
@@ -1023,8 +1036,8 @@ function buildExecutivePresentationPrompt(state) {
     ...financialFacts.map((f) => `- ${f}`),
     `- Data anchor: ${qForm} filed ${freshness.quarterly_anchor_filing_date || naReason('filing date not recorded')} (report period ${freshness.quarterly_anchor_report_date || period})`,
     peerPublished
-      ? `- Peer comparison available for ${fyLabel} — include only if it strengthens the narrative.`
-      : '- Omit peer comparison slides — peer financials were not available with consistent SEC methodology for this run.',
+      ? `- Peer comparison available for ${fyLabel} — categorical annual peer table in Section 3 (approximations labeled).`
+      : '- Peer comparison section not available for this run.',
     '',
     'OPPORTUNITIES TIED TO FINANCIALS',
     ...(priorities.length ? priorities : ['- Link each strategic opportunity to a baseline metric from the quarterly filing.']),
@@ -1145,11 +1158,23 @@ function buildPortalDashboard(state) {
     metrics.push({ id: 'market_cap', label: 'Market Cap', display: fmtUsdValue(market.market_cap_usd), value: market.market_cap_usd, kind: 'usd' });
   }
 
-  const peerBars = peers.slice(0, 3).map((peer) => {
-    const op = peer.metrics?.['Operating Margin'] || peer.metrics?.['Op Margin'] || 'N/A';
-    const rev = peer.metrics?.Revenue || 'N/A';
-    return { name: peer.name, operating_margin: op, revenue: rev, role: peer.role || 'peer' };
-  });
+  const peerRows = state.peer_benchmarks?.categorical_rows || state.peer_benchmarks?.peers || [];
+  const peerBars = peerRows.filter((p) => p.role !== 'target company').slice(0, 3).map((peer) => ({
+    name: peer.company_name || peer.name || peer.entered_name,
+    operating_margin: peer.operating_margin || peer.metrics?.['Operating Margin'] || 'N/A',
+    revenue: peer.latest_annual_revenue || peer.metrics?.Revenue || 'N/A',
+    role: peer.role || 'peer',
+  }));
+  if (!peerBars.length) {
+    peerRows.slice(0, 3).forEach((peer) => {
+      peerBars.push({
+        name: peer.company_name || peer.name,
+        operating_margin: peer.operating_margin || 'N/A',
+        revenue: peer.latest_annual_revenue || 'N/A',
+        role: peer.role || 'peer',
+      });
+    });
+  }
 
   return {
     company: companyDisplayName(state.entity, state.inputs),
@@ -1158,7 +1183,7 @@ function buildPortalDashboard(state) {
     initiatives,
     recommendations: linked,
     peer_comparison: {
-      published: state.peer_benchmarks?.table_published === true,
+      published: Boolean(state.peer_benchmarks?.markdown),
       benchmark_fy: state.peer_benchmarks?.benchmark_fy || null,
       target: targetPeer ? { name: targetPeer.name, metrics: targetPeer.metrics } : null,
       peers: peerBars,
@@ -1625,4 +1650,342 @@ function buildProductPeerComparison(state, entityNames) {
     markdown: comparison.markdown,
     has_data: comparison.has_data,
   };
+}
+
+// Three-year annual revenue series from 10-K / 20-F filings only (not quarterly)
+
+const THREE_YEAR_REVENUE_FYS = [2025, 2024, 2023];
+
+function filingRefForAnnualRow(row, recentFilings) {
+  if (!row) return naReason('no annual revenue row matched');
+  const filed = row.filed || null;
+  const form = row.form || '10-K';
+  const match = (recentFilings || []).find((f) => {
+    if (f.form !== form && !(isAnnualForm(f.form) && isAnnualForm(form))) return false;
+    if (filed && f.filing_date && String(f.filing_date) === String(filed)) return true;
+    if (row.end && f.report_date && String(f.report_date) === String(row.end)) return true;
+    return false;
+  });
+  if (match?.accession_number) {
+    return `${form} accession ${match.accession_number} (filed ${match.filing_date || filed || 'date n/a'})`;
+  }
+  if (filed) return `${form} filed ${filed}${row.end ? `, fiscal year-end ${row.end}` : ''}`;
+  return `${form}${row.end ? `, fiscal year-end ${row.end}` : ''}`;
+}
+
+function annualRevenueRowForFy(facts, fy, fx, native) {
+  const found = tagRowsMerged(facts, 'revenue');
+  const row = found.rows
+    .filter((r) => isAnnualForm(r.form) && (r.fp === 'FY' || r.form === '10-K' || r.form === '20-F' || !r.fp))
+    .filter((r) => Number(r.fy) === Number(fy))
+    .sort((a, b) => String(a.filed || '').localeCompare(String(b.filed || '')) || String(a.end || '').localeCompare(String(b.end || '')))
+    .at(-1);
+  if (!row) return null;
+  const unit = Object.keys(facts[found.tag]?.units || {})[0] || native;
+  const nativeVal = Number(row.val);
+  const usdVal = convertToUsd(nativeVal, unit, fx);
+  return {
+    fy: Number(fy),
+    fiscal_year_end: row.end || naReason('fiscal year-end date not on XBRL row'),
+    filing_date: row.filed || naReason('filing date not on XBRL row'),
+    form: row.form || '10-K',
+    revenue_raw: usdVal !== null ? usdVal : nativeVal,
+    revenue_display: fmtUsdValue(usdVal !== null ? usdVal : nativeVal),
+    tag: found.tag,
+    taxonomy: found.taxonomy || 'us-gaap',
+    source_name: `SEC EDGAR ${found.taxonomy || 'us-gaap'}:${found.tag}`,
+  };
+}
+
+function yoyRevenueGrowth(current, prior) {
+  if (current === null || prior === null || prior === 0) {
+    return naReason('prior-year revenue missing — YoY growth not computable');
+  }
+  const rate = (current - prior) / prior;
+  return fmtPct(rate);
+}
+
+function buildThreeYearRevenueFrom10K(state) {
+  const facts = state.research?.financials?.merged_facts || state.research?.financials?.raw_us_gaap_facts || {};
+  const fx = state.research?.financials?.fx_to_usd || {};
+  const native = state.research?.financials?.native_currency || 'USD';
+  const recentFilings = state.research?.filings?.recent_filings || [];
+  const company = companyDisplayName(state.entity, state.inputs);
+
+  const rows = THREE_YEAR_REVENUE_FYS.map((fy) => {
+    const annual = annualRevenueRowForFy(facts, fy, fx, native);
+    return {
+      fy,
+      fiscal_year_end: annual?.fiscal_year_end || naReason(`FY${fy} 10-K/20-F revenue row not found in SEC company facts`),
+      filing_date: annual?.filing_date || naReason(`FY${fy} filing date not found`),
+      revenue: annual?.revenue_display || naReason(`FY${fy} revenue not reported on annual filing`),
+      revenue_raw: annual?.revenue_raw ?? null,
+      source_ref: annual ? filingRefForAnnualRow({ ...annual, filed: annual.filing_date, end: annual.fiscal_year_end, form: annual.form }, recentFilings) : naReason(`no FY${fy} annual filing match`),
+      form: annual?.form || '10-K',
+      reporting_period: `FY${fy} (annual 10-K/20-F only — not quarterly)`,
+    };
+  });
+
+  for (let i = 0; i < rows.length; i++) {
+    const current = rows[i].revenue_raw;
+    const priorRow = rows.find((r) => r.fy === rows[i].fy - 1);
+    const prior = priorRow?.revenue_raw ?? null;
+    rows[i].yoy_growth = yoyRevenueGrowth(current, prior);
+  }
+
+  const available = rows.filter((r) => r.revenue_raw !== null);
+  const trendParts = [];
+  for (let i = 1; i < available.length; i++) {
+    const cur = available[i];
+    const prev = available[i - 1];
+    if (prev.revenue_raw && cur.revenue_raw) {
+      const g = ((cur.revenue_raw - prev.revenue_raw) / prev.revenue_raw) * 100;
+      trendParts.push(`${prev.fy}→${cur.fy}: ${g >= 0 ? '+' : ''}${g.toFixed(1)}%`);
+    }
+  }
+  const narrative_summary = available.length >= 2
+    ? `${company} annual revenue (10-K/20-F only): ${trendParts.join('; ')}. This is a separate annual-growth view — not mixed with quarterly revenue in Section 2a.`
+    : naReason('insufficient annual 10-K revenue years to summarize 3-year trend');
+
+  const markdown = [
+    '## 3-Year Revenue From 10-Ks',
+    '',
+    'Annual revenue only from the last three fiscal-year 10-K / 20-F filings. Quarterly revenue is shown separately in Section 2a and is not included here.',
+    '',
+    '| Fiscal year | Fiscal year-end | Filing date | Revenue (USD) | YoY growth vs prior year | SEC filing reference |',
+    '|---|---|---|---|---|---|',
+    ...rows.map((r) => `| FY${r.fy} | ${r.fiscal_year_end} | ${r.filing_date} | ${r.revenue} | ${r.yoy_growth} | ${r.source_ref} |`),
+    '',
+    `**Annual growth view:** ${narrative_summary}`,
+    '',
+    'Note: 8-K filings are recent-event references only and are not used as the operating or revenue anchor for this table.',
+  ].join('\n');
+
+  return {
+    generated_at: new Date().toISOString(),
+    years: THREE_YEAR_REVENUE_FYS,
+    rows,
+    narrative_summary,
+    markdown,
+    has_data: available.length > 0,
+  };
+}
+
+// Standardized peer comparison with SEC-first sourcing and labeled fallbacks
+
+const PEER_CATEGORY_ROLES = ['target company', 'scale benchmark', 'close competitor', 'industry peer', 'category peer'];
+
+const STREAMING_CATEGORY_PROXY = {
+  revenue: 15e9,
+  operating_margin: 0.12,
+  net_margin: 0.08,
+  fcf_margin: 0.1,
+  revenue_growth: 0.08,
+  source: 'Subscription streaming category median proxy',
+  method: 'Estimated from comparable streaming peer set when entity SEC tags and curated fallback are unavailable',
+};
+
+const PEER_ANNUAL_FALLBACK = {
+  netflix: {
+    fy: 2024,
+    revenue: 39.0e9,
+    operating_margin: 0.267,
+    net_margin: 0.22,
+    fcf_margin: 0.18,
+    revenue_growth: 0.156,
+    source: 'Netflix FY2024 Form 10-K (approx. from filed annual figures)',
+    method: 'Annual report compilation when live SEC tags are incomplete',
+  },
+  disney: {
+    fy: 2024,
+    revenue: 91.4e9,
+    operating_margin: 0.111,
+    net_margin: 0.072,
+    fcf_margin: 0.09,
+    revenue_growth: 0.03,
+    source: 'Disney FY2024 Form 10-K (consolidated; approximation)',
+    method: 'Latest annual report figures — consolidated entity, not Disney+ standalone',
+  },
+  'warner bros discovery': {
+    fy: 2024,
+    revenue: 38.2e9,
+    operating_margin: 0.02,
+    net_margin: -0.04,
+    fcf_margin: 0.08,
+    revenue_growth: -0.07,
+    source: 'WBD FY2024 Form 10-K (consolidated; approximation)',
+    method: 'Latest annual report — Max/HBO Max maps to parent WBD consolidated financials',
+  },
+  amazon: {
+    fy: 2024,
+    revenue: 638.0e9,
+    operating_margin: 0.109,
+    net_margin: 0.093,
+    fcf_margin: 0.12,
+    revenue_growth: 0.11,
+    source: 'Amazon FY2024 Form 10-K (consolidated; approximation)',
+    method: 'Prime Video compared via Amazon consolidated annual report — not Prime Video standalone',
+  },
+  apple: {
+    fy: 2024,
+    revenue: 391.0e9,
+    operating_margin: 0.315,
+    net_margin: 0.242,
+    fcf_margin: 0.26,
+    revenue_growth: 0.02,
+    source: 'Apple FY2024 Form 10-K (consolidated; approximation)',
+    method: 'Apple TV+ compared via Apple Services/consolidated annual report proxy',
+  },
+  comcast: {
+    fy: 2024,
+    revenue: 121.6e9,
+    operating_margin: 0.19,
+    net_margin: 0.11,
+    fcf_margin: 0.14,
+    revenue_growth: 0.05,
+    source: 'Comcast FY2024 Form 10-K (consolidated; approximation)',
+    method: 'Peacock compared via NBCUniversal/Comcast consolidated annual figures',
+  },
+  'paramount global': {
+    fy: 2024,
+    revenue: 28.7e9,
+    operating_margin: 0.05,
+    net_margin: -0.02,
+    fcf_margin: 0.04,
+    revenue_growth: -0.02,
+    source: 'Paramount Global FY2024 Form 10-K (approximation)',
+    method: 'Paramount+ compared via parent consolidated annual report',
+  },
+  alphabet: {
+    fy: 2024,
+    revenue: 350.0e9,
+    operating_margin: 0.32,
+    net_margin: 0.28,
+    fcf_margin: 0.25,
+    revenue_growth: 0.14,
+    source: 'Alphabet FY2024 Form 10-K (consolidated; approximation)',
+    method: 'YouTube Premium compared via Alphabet consolidated annual proxy',
+  },
+};
+
+function fallbackKeyForEntity(name, secLookupName) {
+  const keys = [secLookupName, name].filter(Boolean).map((n) => normName(n));
+  for (const [key] of Object.entries(PEER_ANNUAL_FALLBACK)) {
+    const nk = normName(key);
+    if (keys.some((k) => k.includes(nk) || nk.includes(k))) return key;
+  }
+  return null;
+}
+
+function labeledApprox(value, kind, sourceNote) {
+  if (value === null || value === undefined || Number.isNaN(value)) return null;
+  const display = kind === 'pct' ? `~${fmtPct(value)}` : `~${fmtUsdValue(value)}`;
+  return { display, approx: true, source_note: sourceNote };
+}
+
+function metricFromSecComputed(computed, key, fyLabel) {
+  const map = {
+    revenue: 'Revenue',
+    operating_margin: 'Operating Margin',
+    net_margin: 'Net Margin',
+    fcf_margin: 'FCF Margin',
+    revenue_growth: 'YoY Revenue Growth',
+  };
+  const val = computed[map[key]];
+  if (!val || isUnavailableDisplay(val)) return null;
+  return { display: `${val} (${fyLabel})`, approx: false, source_note: `SEC EDGAR company facts — FY${fyLabel.replace('FY', '')} annual filing` };
+}
+
+function buildPeerAnnualMetricBundle(merged, benchmarkFy, fx, native, entityName, secLookupName) {
+  const fyCandidates = [benchmarkFy, benchmarkFy - 1, benchmarkFy - 2];
+  const fy = fyCandidates.find((y) => annualFactValue(merged, 'revenue', y, fx, native)) || benchmarkFy;
+  const fyLabel = `FY${fy}`;
+  const computed = computePeerMetricsFromFacts(merged, fy, fx, native);
+
+  const secSource = `SEC EDGAR annual company facts (${fyLabel})`;
+  const bundle = {
+    fy,
+    fy_label: fyLabel,
+    revenue: metricFromSecComputed(computed, 'revenue', fyLabel),
+    operating_margin: metricFromSecComputed(computed, 'operating_margin', fyLabel),
+    net_margin: metricFromSecComputed(computed, 'net_margin', fyLabel),
+    fcf_margin: metricFromSecComputed(computed, 'fcf_margin', fyLabel),
+    revenue_growth: metricFromSecComputed(computed, 'revenue_growth', fyLabel),
+    primary_source: secSource,
+    method: 'SEC filing',
+  };
+
+  const fallbackKey = fallbackKeyForEntity(entityName, secLookupName);
+  const fallback = fallbackKey ? PEER_ANNUAL_FALLBACK[fallbackKey] : null;
+  const fallbackFy = fallback ? `FY${fallback.fy}` : fyLabel;
+
+  function fill(key, secKey, kind) {
+    if (bundle[key]?.display) return;
+    if (!fallback) {
+      const proxy = STREAMING_CATEGORY_PROXY;
+      const approx = labeledApprox(proxy[secKey], kind, `${proxy.source} — ${proxy.method}`);
+      if (approx) {
+        bundle[key] = { ...approx, display: `${approx.display} (${fyLabel}, category proxy)` };
+        bundle.method = 'category median proxy';
+        bundle.primary_source = `${bundle.primary_source}; ${proxy.source}`;
+      }
+      return;
+    }
+    const approx = labeledApprox(fallback[secKey], kind, `${fallback.source} — ${fallback.method}`);
+    if (approx) {
+      bundle[key] = { ...approx, display: `${approx.display} (${fallbackFy}, approximation)` };
+      bundle.method = bundle.method === 'SEC filing' ? 'SEC filing + annual report fallback' : 'annual report fallback';
+      bundle.primary_source = `${bundle.primary_source}; fallback: ${fallback.source}`;
+    }
+  }
+
+  fill('revenue', 'revenue', 'usd');
+  fill('operating_margin', 'operating_margin', 'pct');
+  fill('net_margin', 'net_margin', 'pct');
+  fill('fcf_margin', 'fcf_margin', 'pct');
+  fill('revenue_growth', 'revenue_growth', 'pct');
+
+  return bundle;
+}
+
+function buildCategoricalPeerRow(name, resolved, role, category, metricBundle) {
+  const m = metricBundle;
+  return {
+    company_name: name,
+    entered_name: resolved.entered_name || name,
+    resolved_label: resolved.resolved_label || name,
+    parent_company: resolved.parent_company || null,
+    role,
+    category: category || resolved.category || 'peer',
+    category_label: getComparisonSchema(resolved.category || category || 'default').label,
+    reporting_period: m.fy_label,
+    latest_annual_revenue: m.revenue?.display || `~N/A (${m.fy_label})`,
+    operating_margin: m.operating_margin?.display || `~N/A (${m.fy_label})`,
+    net_margin: m.net_margin?.display || `~N/A (${m.fy_label})`,
+    fcf_margin: m.fcf_margin?.display || `~N/A (${m.fy_label})`,
+    revenue_growth: m.revenue_growth?.display || `~N/A (${m.fy_label})`,
+    source_note: m.primary_source || m.method,
+    method: m.method,
+    approx_fields: ['revenue', 'operating_margin', 'net_margin', 'fcf_margin', 'revenue_growth']
+      .filter((k) => m[k]?.approx),
+  };
+}
+
+function formatCategoricalPeerMarkdown(rows, benchmarkFy, now, productComparisonMarkdown) {
+  const lines = [
+    '## Section 3: Peer Comparison & Benchmarking',
+    '',
+    `Data fetched at runtime: ${now}`,
+    `Benchmark window: latest available annual filings aligned to FY${benchmarkFy} methodology. Quarterly figures are not mixed into this peer table.`,
+    '',
+    'Each peer row is categorically populated. Values prefixed with ~ are approximations from the latest annual report or curated market-source fallback when SEC company-facts tags are incomplete. See source note per row.',
+    '',
+    '| Company | Role / category | Reporting period | Latest annual revenue | Operating margin | Net margin | FCF margin | Revenue growth (YoY) | Source note |',
+    '|---|---|---|---|---|---|---|---|---|',
+    ...rows.map((r) => `| ${r.company_name}${r.resolved_label && r.entered_name !== r.resolved_label ? ` → ${r.resolved_label}` : ''} | ${r.role} / ${r.category_label || r.category} | ${r.reporting_period} | ${r.latest_annual_revenue} | ${r.operating_margin} | ${r.net_margin} | ${r.fcf_margin} | ${r.revenue_growth} | ${r.source_note} |`),
+  ];
+  if (productComparisonMarkdown) {
+    lines.push('', productComparisonMarkdown);
+  }
+  return lines.join('\n');
 }

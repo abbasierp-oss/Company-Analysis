@@ -9,7 +9,7 @@ function textFrom(nodeName) {
 }
 const s4 = parseClaudeJson(textFrom('Claude Section 4 Insights'));
 const s7 = parseClaudeJson(textFrom('Claude Section 7 RTBL'));
-if ((state.peer_benchmarks?.table_published || state.peer_benchmarks?.product_comparison_published) && state.peer_benchmarks?.markdown) {
+if (state.peer_benchmarks?.markdown) {
   state.sections.s3_benchmarks = state.peer_benchmarks.markdown;
 } else {
   delete state.sections.s3_benchmarks;

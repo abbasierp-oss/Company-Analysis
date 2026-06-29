@@ -19,25 +19,28 @@ function buildDeterministicInsights(state) {
   const issuer = state.entity?.issuer_profile?.description || 'public company';
   const ref8k = state.data_freshness?.recent_8k_form;
   const ref8kDate = state.data_freshness?.recent_8k_filing_date;
-  const peerReady = state.peer_benchmarks?.table_published === true;
+  const peerReady = Boolean(state.peer_benchmarks?.markdown);
+  const threeYear = state.financial_snapshot?.three_year_revenue;
+  const annualTrend = threeYear?.narrative_summary || naReason('3-year 10-K revenue trend not available');
   return [
     '## Section 4: Three Strategic Insights',
     '',
-    `Metric basis: quarterly anchor ${period}. GAAP figures from SEC filings unless marked as interpretation.`,
+    `Metric basis: quarterly anchor ${period} for operating metrics. Annual revenue growth is cited separately from the 3-Year Revenue From 10-Ks section (FY2025/FY2024/FY2023) and is not mixed with quarterly revenue.`,
     '',
     '### Insight 1 — Cash-flow quality and reinvestment',
-    `- Revenue: ${formatQuarterlyMetric(q.revenue)} — ${metricCitationShort(q.revenue, qForm)}`,
-    `- Operating margin: ${formatQuarterlyMetric(q.operating_margin, 'pct')} — ${metricCitationShort(q.operating_margin, qForm)} (computed: operating income ÷ revenue)`,
-    `- FCF: ${formatQuarterlyMetric(q.free_cash_flow)} — ${metricCitationShort(q.free_cash_flow, qForm)} (computed: operating cash flow − capex)`,
-    `- EPS: ${formatQuarterlyMetric(q.eps, 'eps')} — ${metricCitationShort(q.eps, qForm)}`,
+    `- Revenue (quarterly anchor): ${formatQuarterlyMetric(q.revenue)} — ${metricCitationShort(q.revenue, qForm)}`,
+    `- Operating margin (quarterly): ${formatQuarterlyMetric(q.operating_margin, 'pct')} — ${metricCitationShort(q.operating_margin, qForm)} (computed: operating income ÷ revenue)`,
+    `- FCF (quarterly): ${formatQuarterlyMetric(q.free_cash_flow)} — ${metricCitationShort(q.free_cash_flow, qForm)} (computed: operating cash flow − capex)`,
+    `- EPS (quarterly): ${formatQuarterlyMetric(q.eps, 'eps')} — ${metricCitationShort(q.eps, qForm)}`,
+    `- **Annual growth view (10-K only):** ${annualTrend}`,
     `- Analyst view (interpretation): Sustainable value creation depends on whether growth is backed by reinvestment and cash conversion, not headline revenue alone.`,
     `- So-what: ${state.inputs?.exec_type || 'Executive'} should prioritize the metric with the weakest source-backed trend before approving new spend.`,
     '',
     '### Insight 2 — Risk, leverage, and cost of capital',
     `- Issuer profile: ${issuer} [filing classification]`,
     peerReady
-      ? `- Peer context: Section 3 FY${state.peer_benchmarks?.benchmark_fy || 2025} table — filing-backed annual SEC facts.`
-      : '- Peer context: omitted — insufficient consistent peer data across entities (see Section 8 gaps).',
+      ? `- Peer context: Section 3 categorical peer table — latest annual revenue and margins (FY${state.peer_benchmarks?.benchmark_fy || 2025}); approximations labeled where SEC tags were incomplete.`
+      : '- Peer context: Section 3 peer table not assembled for this run (see Section 8 gaps).',
     `- Analyst view (interpretation): Risk shows up in leverage, coverage, and earnings volatility versus peers.`,
     `- So-what: If leverage or margin trails peers, the strategic plan must explain convergence or justify a premium/discount.`,
     '',
@@ -64,7 +67,8 @@ function buildExecutivePresentationPrompt(state) {
   const fyAnchor = state.research?.filing_anchors?.annual_10k;
   const fyLabel = fyAnchor?.fy ? `FY${fyAnchor.fy}` : annualSectionLabel(fyAnchor);
   const market = state.research?.market_data || {};
-  const peerPublished = state.peer_benchmarks?.table_published === true;
+  const peerPublished = Boolean(state.peer_benchmarks?.markdown);
+  const threeYear = state.financial_snapshot?.three_year_revenue;
   const freshness = state.data_freshness || {};
   const qForm = freshness.quarterly_anchor_form || '10-Q';
 
@@ -78,6 +82,7 @@ function buildExecutivePresentationPrompt(state) {
       ? `Market cap: ${fmtUsdValue(market.market_cap_usd)} (${market.market_cap_source || 'computed from live share price and SEC shares outstanding'})`
       : naReason('market cap requires live share price and SEC shares outstanding'),
     market.share_price_usd != null ? `Share price: ${fmtUsdValue(market.share_price_usd)} as of ${market.source_date || 'latest quote'}` : null,
+    threeYear?.narrative_summary ? `3-year annual revenue trend (10-K only): ${threeYear.narrative_summary}` : null,
   ].filter(Boolean);
 
   const priorities = (state.executive_proposal?.priorities || []).map((p, i) => (
@@ -134,8 +139,8 @@ function buildExecutivePresentationPrompt(state) {
     ...financialFacts.map((f) => `- ${f}`),
     `- Data anchor: ${qForm} filed ${freshness.quarterly_anchor_filing_date || naReason('filing date not recorded')} (report period ${freshness.quarterly_anchor_report_date || period})`,
     peerPublished
-      ? `- Peer comparison available for ${fyLabel} — include only if it strengthens the narrative.`
-      : '- Omit peer comparison slides — peer financials were not available with consistent SEC methodology for this run.',
+      ? `- Peer comparison available for ${fyLabel} — categorical annual peer table in Section 3 (approximations labeled).`
+      : '- Peer comparison section not available for this run.',
     '',
     'OPPORTUNITIES TIED TO FINANCIALS',
     ...(priorities.length ? priorities : ['- Link each strategic opportunity to a baseline metric from the quarterly filing.']),

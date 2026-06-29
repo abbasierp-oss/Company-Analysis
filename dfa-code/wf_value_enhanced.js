@@ -7,7 +7,7 @@ const provider = state.inputs?.service_provider || 'MY COMPANY';
 const q = getQuarterlyAnchorMetrics(state);
 const period = q.period_label || 'Quarterly anchor';
 const market = state.research?.market_data || {};
-const peerPublished = state.peer_benchmarks?.table_published === true;
+const peerPublished = Boolean(state.peer_benchmarks?.markdown);
 const initiatives = extractITInitiatives(state);
 const revDisplay = formatQuarterlyMetric(q.revenue);
 const opMarginDisplay = formatQuarterlyMetric(q.operating_margin, 'pct');
