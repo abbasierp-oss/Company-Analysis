@@ -52,7 +52,7 @@ function buildDeterministicInsights(state) {
   ].join('\n');
 }
 
-function buildExecutivePresentationPrompt(state) {
+function buildExecutivePresentationPrompt(state, deckContext) {
   const inputs = state.inputs || {};
   const company = companyDisplayName(state.entity, inputs);
   const legalName = state.entity?.legal_name || inputs.company_name || company;
@@ -61,7 +61,7 @@ function buildExecutivePresentationPrompt(state) {
   const industry = inputs.industry || 'the industry';
   const provider = inputs.service_provider || 'our team';
   const expert = inputs.expert_resolved?.name || inputs.expert_pref || 'industry specialist';
-  const slideCount = [3, 4, 5].includes(Number(inputs.slide_count)) ? Number(inputs.slide_count) : 4;
+  const slideCount = DECK_SLIDE_COUNT;
   const q = getQuarterlyAnchorMetrics(state);
   const period = q.period_label || 'latest quarter';
   const fyAnchor = state.research?.filing_anchors?.annual_10k;
@@ -71,6 +71,13 @@ function buildExecutivePresentationPrompt(state) {
   const threeYear = state.financial_snapshot?.three_year_revenue;
   const freshness = state.data_freshness || {};
   const qForm = freshness.quarterly_anchor_form || '10-Q';
+
+  const logos = deckContext?.logos || {
+    company: resolveLogoAsset('company', state),
+    provider: resolveLogoAsset('provider', state),
+  };
+  const slideMaster = deckContext?.slideMaster || buildDeckSlideMaster(logos);
+  const slides = TEN_SLIDE_OUTLINE;
 
   const financialFacts = [
     `Revenue (${period}): ${formatQuarterlyMetric(q.revenue)}`,
@@ -93,29 +100,6 @@ function buildExecutivePresentationPrompt(state) {
     `- ${s.insight} → ${s.value}`
   ));
 
-  const slideStructures = {
-    3: [
-      'Slide 1: Company snapshot — identity, latest financial headline numbers, and why this matters now for the board.',
-      'Slide 2: Performance and priorities — margins, cash flow, and the top 2–3 filing-backed priorities with dollar or margin impact.',
-      'Slide 3: Recommended actions and business case — what to do next, expected financial impact, and ask of the executive audience.',
-    ],
-    4: [
-      'Slide 1: Company and market context — legal name, ticker, industry, market cap, and latest quarterly anchor.',
-      'Slide 2: Financial performance — revenue, margins, FCF, and EPS from the quarterly filing; call out one-time items if disclosed.',
-      'Slide 3: Strategic insights and risks — three insights tied to specific metrics; include peer context only if data was available.',
-      'Slide 4: Executive recommendations and value case — priorities linked to financial metrics, discovery questions, and next-step ask.',
-    ],
-    5: [
-      'Slide 1: Title and executive summary — company, audience, and the single most important financial message.',
-      'Slide 2: Financial snapshot — quarterly and annual headline metrics with sources.',
-      'Slide 3: Ratio and trend readout — leverage, coverage, and margin trends that frame risk.',
-      'Slide 4: Opportunities tied to financials — each initiative linked to a baseline metric and target improvement.',
-      'Slide 5: Recommended actions, timeline, and ask — 30/60/90-day moves with measurable KPIs.',
-    ],
-  };
-
-  const slides = slideStructures[slideCount] || slideStructures[4];
-
   return [
     `Create a ${slideCount}-slide executive presentation for a ${execType} audience.`,
     '',
@@ -126,13 +110,20 @@ function buildExecutivePresentationPrompt(state) {
     `- Presenter positioning: ${provider} advising ${execType} leadership`,
     '- Tone: board-ready, concise, confident. Use plain business language.',
     '- Do NOT reference academic valuation frameworks, professor names, or niche finance jargon.',
-  '',
+    '',
+    'SLIDE MASTER AND FOOTER (CRITICAL — apply globally)',
+    buildDeckFooterMarkdown(logos),
+    '- Configure ONE slide master; every slide inherits the same footer row automatically.',
+    '- Left footer column: company logo only. Right footer column: service provider logo only.',
+    `- Company logo source: ${logos.company.url || 'manual'} — ${logos.company.source_note || logos.company.fallback_note || ''}`,
+    `- Provider logo source: ${logos.provider.url || 'manual'} — ${logos.provider.source_note || logos.provider.fallback_note || ''}`,
+    '',
     'DESIGN DIRECTION',
     '- Theme: clean executive finance — dark navy or charcoal with one accent color, large numbers, minimal text per slide.',
     '- Every slide should lead with a number or a clear decision, not a paragraph.',
     '- Use charts only where a trend or comparison is filing-backed.',
     '',
-    'SLIDE OUTLINE (follow this structure)',
+    'SLIDE OUTLINE (10 slides — follow this structure exactly)',
     ...slides.map((s) => `- ${s}`),
     '',
     'FILING-BACKED FINANCIAL FACTS (use these figures — do not invent numbers)',
@@ -148,12 +139,19 @@ function buildExecutivePresentationPrompt(state) {
     '',
     'CONTENT RULES',
     '- Tie every recommendation to a specific IT initiative and the financial metric it moves (revenue, margin, FCF, leverage, or market cap).',
+    '- Keep quarterly metrics on slides 2–3 separate from annual 10-K revenue on slide 3.',
     '- If a figure was not available, state why briefly instead of showing "N/A".',
     '- Flag one-time items (e.g., termination fees) separately from core operating performance.',
     '- End with a clear ask: approve diagnostic, set metric targets, or schedule executive review.',
     '',
     'OUTPUT FORMAT',
-    '- Produce slide titles, 3–4 bullets per slide, and brief speaker notes.',
+    '- Produce exactly 10 slides with titles, 3–4 bullets per slide, and brief speaker notes.',
+    '- Every slide must include the inherited two-column footer with company logo left and provider logo right.',
     '- Suitable for import into Gamma, Canva, PowerPoint Copilot, or similar tools.',
+    '',
+    'SLIDE MASTER JSON (for tools that accept structured deck input)',
+    '```json',
+    JSON.stringify(slideMaster, null, 2),
+    '```',
   ].join('\n');
 }

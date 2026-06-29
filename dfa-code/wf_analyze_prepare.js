@@ -1,7 +1,23 @@
 const state = items[0]?.json?.state || items[0]?.json || {};
 const inputs = state.inputs || {};
 const expert = inputs.expert_resolved || { name: inputs.expert_pref || 'industry expert' };
-const dataPack = { entity: state.entity, inputs, normalized: state.normalized, research: state.research, peer_benchmarks: state.peer_benchmarks, financial_snapshot: state.financial_snapshot, ratio_dashboard: state.ratio_dashboard, event_research: state.event_research, data_freshness: state.data_freshness };
+const research = state.research ? {
+  filing_anchors: state.research.filing_anchors,
+  market_data: state.research.market_data,
+  source_status: state.research.source_status,
+  filings: state.research.filings ? { recent_filings: (state.research.filings.recent_filings || []).slice(0, 12) } : undefined,
+} : {};
+const dataPack = {
+  entity: state.entity,
+  inputs,
+  normalized: state.normalized,
+  research,
+  peer_benchmarks: state.peer_benchmarks,
+  financial_snapshot: state.financial_snapshot,
+  ratio_dashboard: state.ratio_dashboard,
+  event_research: state.event_research,
+  data_freshness: state.data_freshness,
+};
 const system = claudeBaseSystem(inputs, expert);
 return [{ json: {
   state,

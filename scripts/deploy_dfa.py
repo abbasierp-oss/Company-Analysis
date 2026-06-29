@@ -267,25 +267,7 @@ def patch_presentation_prompt(wf):
 
 
 def patch_delivery(wf):
-    set_node_code(wf, 'Prepare Delivery Payloads', """const state = items[0]?.json?.state || items[0]?.json || {};
-const targets = state.inputs?.delivery_targets || ['webhook_response'];
-state.delivery = state.delivery || {};
-state.delivery.targets = targets;
-state.delivery.final_artifact_type = 'presentation_prompt';
-state.delivery.payloads = {
-  presentation_tool: {
-    action: 'copy_prompt_into_gamma_canva_or_ppt',
-    artifact_field: 'presentation_prompt.prompt_text',
-    note: 'Paste the executive presentation prompt into Gamma, Canva, PowerPoint Copilot, or similar.',
-  },
-  full_report: {
-    action: 'copy_full_report_markdown',
-    artifact_field: 'final_report_markdown',
-  },
-};
-state.audit_log = state.audit_log || [];
-state.audit_log.push({ timestamp: new Date().toISOString(), workflow_name: 'WF_DELIVERY', status: 'OK', message: 'Delivery payloads prepared for report and presentation prompt.' });
-return [{ json: state }];""")
+    set_node_code(wf, 'Prepare Delivery Payloads', bundle('wf_delivery.js'))
 
 
 def patch_entity(wf):
@@ -383,8 +365,7 @@ def patch_main_prod(wf):
     init_code = """const input = items[0]?.json || {};
 const body = input.body || input;
 const now = new Date().toISOString();
-const slideCountRaw = Number(body.slide_count || body.slideCount || body.inputs?.slide_count || 4);
-const slideCount = [3,4,5].includes(slideCountRaw) ? slideCountRaw : 4;
+const slideCount = 10;
 const existing = body.state || (body.run_id && body.inputs ? body : null);
 if (existing) {
   existing.updated_at = now;

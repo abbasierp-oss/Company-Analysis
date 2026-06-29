@@ -37,7 +37,8 @@ class LibBundleTests(unittest.TestCase):
         self.assertIn('function getQuarterlyAnchorMetrics', lib)
         self.assertIn('function buildPortalDashboard', lib)
         self.assertIn('function buildThreeYearRevenueFrom10K', lib)
-        self.assertIn('function buildPeerAnnualMetricBundle', lib)
+        self.assertIn('function buildPresentationPackage', lib)
+        self.assertIn('DECK_SLIDE_COUNT', lib)
         self.assertIn('function extractITInitiatives', lib)
 
     def test_lib_bundle_same_line_count_order(self):

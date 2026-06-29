@@ -8,6 +8,7 @@ const execType = clean(body.exec_type || body.executive);
 const industry = clean(body.industry);
 const expertPref = clean(body.expert_pref || body.expert || body.industry_expert);
 const serviceProvider = clean(body.service_provider || body.my_company || body.provider_company) || 'MY COMPANY';
+const slide_count = 10;
 const peerListRaw = body.peer_list || body.peers || '';
 const peer_list = Array.isArray(peerListRaw) ? peerListRaw : String(peerListRaw || '').split(/[,;\n|]/).map((s) => s.trim()).filter(Boolean);
 const itInitiativesRaw = body.it_initiatives || body.it_initiative_list || body.initiative_roadmap || '';
@@ -42,6 +43,6 @@ const state = {
   status: 'queued',
   current_stage: 'queued',
   conversation_complete: true,
-  inputs: { company_name: companyName, ticker, exec_type: execType, industry, expert_pref: expertPref, expert_resolved: expertResolved, service_provider: serviceProvider, peer_list, it_initiatives, source_notes: clean(body.source_notes || ''), human_review: Boolean(body.human_review) },
+  inputs: { company_name: companyName, ticker, exec_type: execType, industry, expert_pref: expertPref, expert_resolved: expertResolved, service_provider: serviceProvider, peer_list, it_initiatives, slide_count, source_notes: clean(body.source_notes || ''), human_review: Boolean(body.human_review) },
 };
 return [{ json: state }];

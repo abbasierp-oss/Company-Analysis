@@ -949,7 +949,7 @@ function buildDeterministicInsights(state) {
   ].join('\n');
 }
 
-function buildExecutivePresentationPrompt(state) {
+function buildExecutivePresentationPrompt(state, deckContext) {
   const inputs = state.inputs || {};
   const company = companyDisplayName(state.entity, inputs);
   const legalName = state.entity?.legal_name || inputs.company_name || company;
@@ -958,7 +958,7 @@ function buildExecutivePresentationPrompt(state) {
   const industry = inputs.industry || 'the industry';
   const provider = inputs.service_provider || 'our team';
   const expert = inputs.expert_resolved?.name || inputs.expert_pref || 'industry specialist';
-  const slideCount = [3, 4, 5].includes(Number(inputs.slide_count)) ? Number(inputs.slide_count) : 4;
+  const slideCount = DECK_SLIDE_COUNT;
   const q = getQuarterlyAnchorMetrics(state);
   const period = q.period_label || 'latest quarter';
   const fyAnchor = state.research?.filing_anchors?.annual_10k;
@@ -968,6 +968,13 @@ function buildExecutivePresentationPrompt(state) {
   const threeYear = state.financial_snapshot?.three_year_revenue;
   const freshness = state.data_freshness || {};
   const qForm = freshness.quarterly_anchor_form || '10-Q';
+
+  const logos = deckContext?.logos || {
+    company: resolveLogoAsset('company', state),
+    provider: resolveLogoAsset('provider', state),
+  };
+  const slideMaster = deckContext?.slideMaster || buildDeckSlideMaster(logos);
+  const slides = TEN_SLIDE_OUTLINE;
 
   const financialFacts = [
     `Revenue (${period}): ${formatQuarterlyMetric(q.revenue)}`,
@@ -990,29 +997,6 @@ function buildExecutivePresentationPrompt(state) {
     `- ${s.insight} → ${s.value}`
   ));
 
-  const slideStructures = {
-    3: [
-      'Slide 1: Company snapshot — identity, latest financial headline numbers, and why this matters now for the board.',
-      'Slide 2: Performance and priorities — margins, cash flow, and the top 2–3 filing-backed priorities with dollar or margin impact.',
-      'Slide 3: Recommended actions and business case — what to do next, expected financial impact, and ask of the executive audience.',
-    ],
-    4: [
-      'Slide 1: Company and market context — legal name, ticker, industry, market cap, and latest quarterly anchor.',
-      'Slide 2: Financial performance — revenue, margins, FCF, and EPS from the quarterly filing; call out one-time items if disclosed.',
-      'Slide 3: Strategic insights and risks — three insights tied to specific metrics; include peer context only if data was available.',
-      'Slide 4: Executive recommendations and value case — priorities linked to financial metrics, discovery questions, and next-step ask.',
-    ],
-    5: [
-      'Slide 1: Title and executive summary — company, audience, and the single most important financial message.',
-      'Slide 2: Financial snapshot — quarterly and annual headline metrics with sources.',
-      'Slide 3: Ratio and trend readout — leverage, coverage, and margin trends that frame risk.',
-      'Slide 4: Opportunities tied to financials — each initiative linked to a baseline metric and target improvement.',
-      'Slide 5: Recommended actions, timeline, and ask — 30/60/90-day moves with measurable KPIs.',
-    ],
-  };
-
-  const slides = slideStructures[slideCount] || slideStructures[4];
-
   return [
     `Create a ${slideCount}-slide executive presentation for a ${execType} audience.`,
     '',
@@ -1023,13 +1007,20 @@ function buildExecutivePresentationPrompt(state) {
     `- Presenter positioning: ${provider} advising ${execType} leadership`,
     '- Tone: board-ready, concise, confident. Use plain business language.',
     '- Do NOT reference academic valuation frameworks, professor names, or niche finance jargon.',
-  '',
+    '',
+    'SLIDE MASTER AND FOOTER (CRITICAL — apply globally)',
+    buildDeckFooterMarkdown(logos),
+    '- Configure ONE slide master; every slide inherits the same footer row automatically.',
+    '- Left footer column: company logo only. Right footer column: service provider logo only.',
+    `- Company logo source: ${logos.company.url || 'manual'} — ${logos.company.source_note || logos.company.fallback_note || ''}`,
+    `- Provider logo source: ${logos.provider.url || 'manual'} — ${logos.provider.source_note || logos.provider.fallback_note || ''}`,
+    '',
     'DESIGN DIRECTION',
     '- Theme: clean executive finance — dark navy or charcoal with one accent color, large numbers, minimal text per slide.',
     '- Every slide should lead with a number or a clear decision, not a paragraph.',
     '- Use charts only where a trend or comparison is filing-backed.',
     '',
-    'SLIDE OUTLINE (follow this structure)',
+    'SLIDE OUTLINE (10 slides — follow this structure exactly)',
     ...slides.map((s) => `- ${s}`),
     '',
     'FILING-BACKED FINANCIAL FACTS (use these figures — do not invent numbers)',
@@ -1045,13 +1036,20 @@ function buildExecutivePresentationPrompt(state) {
     '',
     'CONTENT RULES',
     '- Tie every recommendation to a specific IT initiative and the financial metric it moves (revenue, margin, FCF, leverage, or market cap).',
+    '- Keep quarterly metrics on slides 2–3 separate from annual 10-K revenue on slide 3.',
     '- If a figure was not available, state why briefly instead of showing "N/A".',
     '- Flag one-time items (e.g., termination fees) separately from core operating performance.',
     '- End with a clear ask: approve diagnostic, set metric targets, or schedule executive review.',
     '',
     'OUTPUT FORMAT',
-    '- Produce slide titles, 3–4 bullets per slide, and brief speaker notes.',
+    '- Produce exactly 10 slides with titles, 3–4 bullets per slide, and brief speaker notes.',
+    '- Every slide must include the inherited two-column footer with company logo left and provider logo right.',
     '- Suitable for import into Gamma, Canva, PowerPoint Copilot, or similar tools.',
+    '',
+    'SLIDE MASTER JSON (for tools that accept structured deck input)',
+    '```json',
+    JSON.stringify(slideMaster, null, 2),
+    '```',
   ].join('\n');
 }
 
@@ -1988,4 +1986,212 @@ function formatCategoricalPeerMarkdown(rows, benchmarkFy, now, productComparison
     lines.push('', productComparisonMarkdown);
   }
   return lines.join('\n');
+}
+
+// Centralized 10-slide deck master, footer logos, and Gamma-ready artifacts
+
+const DECK_SLIDE_COUNT = 10;
+
+const TEN_SLIDE_OUTLINE = [
+  'Slide 1: Title and executive summary — company, audience, and the single most important financial message.',
+  'Slide 2: Quarterly financial snapshot — revenue, margins, FCF, EPS from the quarterly filing anchor only.',
+  'Slide 3: 3-Year Revenue from 10-Ks — FY2025/FY2024/FY2023 annual revenue trend (not quarterly).',
+  'Slide 4: Annual financials and ratio dashboard — FY margins, leverage, and coverage metrics.',
+  'Slide 5: Market data — share price, market cap, and shares outstanding with as-of date.',
+  'Slide 6: Peer comparison — categorical annual peer table with labeled sources.',
+  'Slide 7: Three strategic insights — filing-backed takeaways with so-what for the executive audience.',
+  'Slide 8: Executive proposal — top priorities tied to IT initiatives and financial hooks.',
+  'Slide 9: Initiative impact and value realization — metrics each initiative moves.',
+  'Slide 10: Recommended actions, 30/60/90-day timeline, and clear ask.',
+];
+
+const COMPANY_LOGO_REGISTRY = {
+  nflx: { domain: 'netflix.com', url: 'https://upload.wikimedia.org/wikipedia/commons/0/08/Netflix_2015_logo.svg', source: 'Wikimedia Commons — Netflix official logo asset' },
+  netflix: { domain: 'netflix.com', url: 'https://upload.wikimedia.org/wikipedia/commons/0/08/Netflix_2015_logo.svg', source: 'Wikimedia Commons — Netflix official logo asset' },
+  dis: { domain: 'disney.com', url: 'https://upload.wikimedia.org/wikipedia/commons/3/3e/Disney%2B_logo.svg', source: 'Wikimedia Commons — Disney brand asset (parent of Disney+)' },
+  wbd: { domain: 'wbd.com', url: 'https://upload.wikimedia.org/wikipedia/commons/0/0c/Warner_Bros._Discovery_logo.svg', source: 'Wikimedia Commons — Warner Bros. Discovery official logo' },
+  amzn: { domain: 'amazon.com', url: 'https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg', source: 'Wikimedia Commons — Amazon official logo' },
+  aapl: { domain: 'apple.com', url: 'https://upload.wikimedia.org/wikipedia/commons/f/fa/Apple_logo_black.svg', source: 'Wikimedia Commons — Apple official logo' },
+  googl: { domain: 'google.com', url: 'https://upload.wikimedia.org/wikipedia/commons/2/2f/Google_2015_logo.svg', source: 'Wikimedia Commons — Alphabet/Google official logo' },
+  msft: { domain: 'microsoft.com', url: 'https://upload.wikimedia.org/wikipedia/commons/9/96/Microsoft_logo_%282012%29.svg', source: 'Wikimedia Commons — Microsoft official logo' },
+};
+
+const PROVIDER_LOGO_REGISTRY = {
+  evoloai: { domain: 'goevolo.com', url: 'https://www.goevolo.com/favicon.ico', source: 'Evolo AI official site favicon (goevolo.com)' },
+  evolo: { domain: 'goevolo.com', url: 'https://www.goevolo.com/favicon.ico', source: 'Evolo AI official site favicon (goevolo.com)' },
+};
+
+function normalizeSlideCount(raw) {
+  const n = Number(raw);
+  if (n === DECK_SLIDE_COUNT) return DECK_SLIDE_COUNT;
+  return DECK_SLIDE_COUNT;
+}
+
+function registryLogoMatch(registry, keys) {
+  for (const key of keys) {
+    const nk = normName(key);
+    if (registry[nk]) return registry[nk];
+    const hit = Object.entries(registry).find(([k]) => nk.includes(k) || k.includes(nk));
+    if (hit) return hit[1];
+  }
+  return null;
+}
+
+function domainGuessFromName(name) {
+  const cleaned = String(name || '').toLowerCase()
+    .replace(/\b(inc|corp|corporation|ltd|llc|company|co)\b/g, '')
+    .replace(/[^a-z0-9]/g, '');
+  if (!cleaned) return null;
+  return `${cleaned}.com`;
+}
+
+function resolveLogoAsset(kind, state) {
+  const inputs = state.inputs || {};
+  const entity = state.entity || {};
+  const isCompany = kind === 'company';
+  const label = isCompany
+    ? companyDisplayName(entity, inputs)
+    : String(inputs.service_provider || 'Service Provider').trim();
+  const ticker = String(entity.ticker || inputs.ticker || '').toLowerCase();
+  const registry = isCompany ? COMPANY_LOGO_REGISTRY : PROVIDER_LOGO_REGISTRY;
+  const keys = isCompany ? [ticker, label, entity.legal_name, inputs.company_name] : [label];
+  const hit = registryLogoMatch(registry, keys);
+  const domain = hit?.domain || domainGuessFromName(label);
+  const clearbitUrl = domain ? `https://logo.clearbit.com/${domain}` : null;
+  const url = hit?.url || clearbitUrl;
+  const source = hit?.source || (clearbitUrl ? `Clearbit Logo API (${domain}) — verify against company IR press kit if unavailable` : null);
+  const align = isCompany ? 'left' : 'right';
+  const fallbackNote = url
+    ? null
+    : `Logo fallback: use official ${label} investor relations or brand press kit; automatic logo URL could not be resolved.`;
+  return {
+    kind,
+    label,
+    align,
+    url: url || null,
+    domain: domain || null,
+    max_height_px: 28,
+    max_width_px: 120,
+    object_fit: 'contain',
+    source_note: source || fallbackNote,
+    fallback_note: fallbackNote,
+    resolved: Boolean(url),
+  };
+}
+
+function buildDeckSlideMaster(logos) {
+  const company = logos.company;
+  const provider = logos.provider;
+  return {
+    slide_count: DECK_SLIDE_COUNT,
+    theme: 'executive_finance_dark_navy',
+    footer: {
+      layout: 'two_column',
+      height_px: 40,
+      padding_px: 12,
+      border_top: '1px solid rgba(255,255,255,0.12)',
+      columns: [
+        {
+          align: 'left',
+          width: '50%',
+          logo: company,
+          instruction: 'Place company logo left-aligned. Scale proportionally; max height 28px; do not stretch.',
+        },
+        {
+          align: 'right',
+          width: '50%',
+          logo: provider,
+          instruction: 'Place service provider logo right-aligned. Scale proportionally; max height 28px; do not stretch.',
+        },
+      ],
+      apply_to: 'every_slide',
+      inherit: true,
+    },
+    logo_fallback_notes: [company.fallback_note, provider.fallback_note].filter(Boolean),
+  };
+}
+
+function buildDeckFooterMarkdown(logos) {
+  const company = logos.company;
+  const provider = logos.provider;
+  const lines = [
+    '### Slide master footer (apply to EVERY slide — do not skip)',
+    '',
+    'Use a single shared slide master. Footer is a two-column row at the bottom of each slide:',
+    `- **Left column:** ${company.label} logo — left-aligned. URL: ${company.url || 'MANUAL — see fallback note'}. ${company.source_note || company.fallback_note || ''}`,
+    `- **Right column:** ${provider.label} logo — right-aligned. URL: ${provider.url || 'MANUAL — see fallback note'}. ${provider.source_note || provider.fallback_note || ''}`,
+    '- Keep both logos small (max ~28px height), consistent across slides, proportionally scaled with object-fit contain — never stretch or distort.',
+    '- Do not rebuild the footer per slide; inherit from the slide master so changes apply globally.',
+  ];
+  if (company.fallback_note) lines.push(`- Company logo fallback: ${company.fallback_note}`);
+  if (provider.fallback_note) lines.push(`- Service provider logo fallback: ${provider.fallback_note}`);
+  return lines.join('\n');
+}
+
+function buildSlidesJson(state, logos, slideMaster) {
+  const titles = TEN_SLIDE_OUTLINE.map((line) => line.replace(/^Slide \d+:\s*/, '').split(' — ')[0]);
+  return titles.map((title, index) => ({
+    index: index + 1,
+    title,
+    footer: 'inherit_master',
+    footer_layout: slideMaster.footer,
+    logos: {
+      left: logos.company,
+      right: logos.provider,
+    },
+    speaker_notes: TEN_SLIDE_OUTLINE[index],
+  }));
+}
+
+function buildGammaDeckMarkdown(state, logos, slideMaster) {
+  const company = companyDisplayName(state.entity, state.inputs);
+  const provider = state.inputs?.service_provider || 'Service Provider';
+  const header = [
+    `# ${company} — Executive Financial Briefing (${DECK_SLIDE_COUNT} slides)`,
+    '',
+    buildDeckFooterMarkdown(logos),
+    '',
+    '## Slide outline',
+  ];
+  const body = TEN_SLIDE_OUTLINE.map((line, i) => `${i + 1}. ${line}`);
+  const footerRepeat = [
+    '',
+    '## Footer reminder',
+    `Every slide inherits the master footer: **${company}** logo left, **${provider}** logo right.`,
+    JSON.stringify(slideMaster.footer, null, 2),
+  ];
+  return header.concat(body).concat(footerRepeat).join('\n');
+}
+
+function buildPresentationPackage(state) {
+  const logos = {
+    company: resolveLogoAsset('company', state),
+    provider: resolveLogoAsset('provider', state),
+  };
+  const slideMaster = buildDeckSlideMaster(logos);
+  const slidesJson = buildSlidesJson(state, logos, slideMaster);
+  const gammaMarkdown = buildGammaDeckMarkdown(state, logos, slideMaster);
+  const promptText = buildExecutivePresentationPrompt(state, { logos, slideMaster, slidesJson, gammaMarkdown });
+  return {
+    slide_count: DECK_SLIDE_COUNT,
+    slide_master: slideMaster,
+    logos,
+    slides_json: slidesJson,
+    gamma_markdown: gammaMarkdown,
+    prompt_text: promptText,
+    logo_fallback_notes: slideMaster.logo_fallback_notes,
+  };
+}
+
+function buildGammaDeck(state) {
+  const pkg = buildPresentationPackage(state);
+  return {
+    generated_at: new Date().toISOString(),
+    slide_count: pkg.slide_count,
+    slide_master: pkg.slide_master,
+    logos: pkg.logos,
+    slides_json: pkg.slides_json,
+    gamma_markdown: pkg.gamma_markdown,
+    logo_fallback_notes: pkg.logo_fallback_notes,
+  };
 }
