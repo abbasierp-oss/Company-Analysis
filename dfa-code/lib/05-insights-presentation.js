@@ -62,6 +62,7 @@ function buildExecutivePresentationPrompt(state, deckContext) {
   const provider = inputs.service_provider || 'our team';
   const expert = inputs.expert_resolved?.name || inputs.expert_pref || 'industry specialist';
   const slideCount = DECK_SLIDE_COUNT;
+  const orgCxo = deckContext?.orgCxo || buildOrgCxoIntel(state);
   const q = getQuarterlyAnchorMetrics(state);
   const period = q.period_label || 'latest quarter';
   const fyAnchor = state.research?.filing_anchors?.annual_10k;
@@ -77,7 +78,7 @@ function buildExecutivePresentationPrompt(state, deckContext) {
     provider: resolveLogoAsset('provider', state),
   };
   const slideMaster = deckContext?.slideMaster || buildDeckSlideMaster(logos);
-  const slides = TEN_SLIDE_OUTLINE;
+  const slides = DECK_SLIDE_OUTLINE;
 
   const financialFacts = [
     `Revenue (${period}): ${formatQuarterlyMetric(q.revenue)}`,
@@ -123,8 +124,15 @@ function buildExecutivePresentationPrompt(state, deckContext) {
     '- Every slide should lead with a number or a clear decision, not a paragraph.',
     '- Use charts only where a trend or comparison is filing-backed.',
     '',
-    'SLIDE OUTLINE (10 slides — follow this structure exactly)',
+    'SLIDE OUTLINE (12 slides — slides 1–10 financial, 11–12 leadership; follow exactly)',
     ...slides.map((s) => `- ${s}`),
+    '',
+    'LEADERSHIP SLIDES (separate from financial metrics — use verified data only)',
+    orgCxo.org_slide_markdown,
+    '',
+    orgCxo.cxo_slide_markdown,
+    '- Do not guess org reporting lines or executive names; keep Unknown where confidence is LOW.',
+    `- Selected CXO audience: ${inputs.exec_type || 'executive'} — slide 12 must profile this role.`,
     '',
     'FILING-BACKED FINANCIAL FACTS (use these figures — do not invent numbers)',
     ...financialFacts.map((f) => `- ${f}`),
@@ -145,7 +153,8 @@ function buildExecutivePresentationPrompt(state, deckContext) {
     '- End with a clear ask: approve diagnostic, set metric targets, or schedule executive review.',
     '',
     'OUTPUT FORMAT',
-    '- Produce exactly 10 slides with titles, 3–4 bullets per slide, and brief speaker notes.',
+    '- Produce exactly 12 slides with titles, 3–4 bullets per slide, and brief speaker notes.',
+    '- Slides 11–12 are leadership/org only — do not mix quarterly or annual financial metrics on those slides.',
     '- Every slide must include the inherited two-column footer with company logo left and provider logo right.',
     '- Suitable for import into Gamma, Canva, PowerPoint Copilot, or similar tools.',
     '',

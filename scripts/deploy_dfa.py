@@ -365,7 +365,7 @@ def patch_main_prod(wf):
     init_code = """const input = items[0]?.json || {};
 const body = input.body || input;
 const now = new Date().toISOString();
-const slideCount = 10;
+const slideCount = 12;
 const existing = body.state || (body.run_id && body.inputs ? body : null);
 if (existing) {
   existing.updated_at = now;

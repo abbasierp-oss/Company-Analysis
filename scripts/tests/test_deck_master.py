@@ -32,9 +32,16 @@ console.log(JSON.stringify(out));
         )
         return json.loads(result.stdout.strip())
 
-    def test_slide_count_fixed_at_ten(self):
-        self.assertEqual(self._eval('normalizeSlideCount(4)'), 10)
-        self.assertEqual(self._eval('normalizeSlideCount(10)'), 10)
+    def test_slide_count_fixed_at_twelve(self):
+        self.assertEqual(self._eval('normalizeSlideCount(10)'), 12)
+        state = {
+            'entity': {'legal_name': 'Netflix Inc', 'ticker': 'NFLX'},
+            'inputs': {'company_name': 'Netflix', 'service_provider': 'Evolo AI', 'exec_type': 'CFO'},
+            'research': {'news_events': []},
+        }
+        pkg = self._eval(f"buildPresentationPackage({json.dumps(state)})")
+        self.assertEqual(pkg['slide_count'], 12)
+        self.assertEqual(pkg['financial_slide_count'], 10)
 
     def test_footer_master_two_columns(self):
         state = {
@@ -46,8 +53,8 @@ console.log(JSON.stringify(out));
         self.assertEqual(footer['layout'], 'two_column')
         self.assertEqual(footer['columns'][0]['align'], 'left')
         self.assertEqual(footer['columns'][1]['align'], 'right')
-        self.assertEqual(pkg['slide_count'], 10)
-        self.assertEqual(len(pkg['slides_json']), 10)
+        self.assertEqual(pkg['slide_count'], 12)
+        self.assertEqual(len(pkg['slides_json']), 12)
 
     def test_netflix_logo_resolves(self):
         state = {

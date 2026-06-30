@@ -1,8 +1,10 @@
-// Centralized 10-slide deck master, footer logos, and Gamma-ready artifacts
+// Centralized 12-slide deck master, footer logos, and Gamma-ready artifacts
 
-const DECK_SLIDE_COUNT = 10;
+const FINANCIAL_SLIDE_COUNT = 10;
+const ORG_INTEL_SLIDE_COUNT = 2;
+const DECK_SLIDE_COUNT = FINANCIAL_SLIDE_COUNT + ORG_INTEL_SLIDE_COUNT;
 
-const TEN_SLIDE_OUTLINE = [
+const FINANCIAL_SLIDE_OUTLINE = [
   'Slide 1: Title and executive summary — company, audience, and the single most important financial message.',
   'Slide 2: Quarterly financial snapshot — revenue, margins, FCF, EPS from the quarterly filing anchor only.',
   'Slide 3: 3-Year Revenue from 10-Ks — FY2025/FY2024/FY2023 annual revenue trend (not quarterly).',
@@ -14,6 +16,16 @@ const TEN_SLIDE_OUTLINE = [
   'Slide 9: Initiative impact and value realization — metrics each initiative moves.',
   'Slide 10: Recommended actions, 30/60/90-day timeline, and clear ask.',
 ];
+
+const ORG_INTEL_SLIDE_OUTLINE = [
+  'Slide 11: Organization structure — concise hierarchy of verified C-suite roles; mark Unknown when reporting lines cannot be confirmed.',
+  'Slide 12: CXO intel — selected executive profile (name, title, function, reporting line, team, brief intel summary).',
+];
+
+const DECK_SLIDE_OUTLINE = [...FINANCIAL_SLIDE_OUTLINE, ...ORG_INTEL_SLIDE_OUTLINE];
+
+// Backward-compatible alias
+const TEN_SLIDE_OUTLINE = FINANCIAL_SLIDE_OUTLINE;
 
 const COMPANY_LOGO_REGISTRY = {
   nflx: { domain: 'netflix.com', url: 'https://upload.wikimedia.org/wikipedia/commons/0/08/Netflix_2015_logo.svg', source: 'Wikimedia Commons — Netflix official logo asset' },
@@ -138,39 +150,57 @@ function buildDeckFooterMarkdown(logos) {
   return lines.join('\n');
 }
 
-function buildSlidesJson(state, logos, slideMaster) {
-  const titles = TEN_SLIDE_OUTLINE.map((line) => line.replace(/^Slide \d+:\s*/, '').split(' — ')[0]);
-  return titles.map((title, index) => ({
-    index: index + 1,
-    title,
-    footer: 'inherit_master',
-    footer_layout: slideMaster.footer,
-    logos: {
-      left: logos.company,
-      right: logos.provider,
-    },
-    speaker_notes: TEN_SLIDE_OUTLINE[index],
-  }));
+function buildSlidesJson(state, logos, slideMaster, orgCxo) {
+  const titles = DECK_SLIDE_OUTLINE.map((line) => line.replace(/^Slide \d+:\s*/, '').split(' — ')[0]);
+  return titles.map((title, index) => {
+    const slideNum = index + 1;
+    const slideType = slideNum <= FINANCIAL_SLIDE_COUNT ? 'financial' : (slideNum === 11 ? 'org_structure' : 'cxo_intel');
+    const base = {
+      index: slideNum,
+      title,
+      slide_type: slideType,
+      footer: 'inherit_master',
+      footer_layout: slideMaster.footer,
+      logos: { left: logos.company, right: logos.provider },
+      speaker_notes: DECK_SLIDE_OUTLINE[index],
+    };
+    if (slideType === 'org_structure' && orgCxo?.org_structure) {
+      base.content = {
+        hierarchy: orgCxo.org_structure.hierarchy,
+        source_note: orgCxo.org_structure.source_note,
+        confidence: orgCxo.org_structure.confidence,
+      };
+    }
+    if (slideType === 'cxo_intel' && orgCxo?.cxo_intel) {
+      base.content = orgCxo.cxo_intel;
+    }
+    return base;
+  });
 }
 
-function buildGammaDeckMarkdown(state, logos, slideMaster) {
+function buildGammaDeckMarkdown(state, logos, slideMaster, orgCxo) {
   const company = companyDisplayName(state.entity, state.inputs);
   const provider = state.inputs?.service_provider || 'Service Provider';
   const header = [
-    `# ${company} — Executive Financial Briefing (${DECK_SLIDE_COUNT} slides)`,
+    `# ${company} — Executive Briefing (${DECK_SLIDE_COUNT} slides: ${FINANCIAL_SLIDE_COUNT} financial + ${ORG_INTEL_SLIDE_COUNT} leadership)`,
     '',
     buildDeckFooterMarkdown(logos),
     '',
-    '## Slide outline',
+    '## Financial slides (1–10)',
   ];
-  const body = TEN_SLIDE_OUTLINE.map((line, i) => `${i + 1}. ${line}`);
+  const financialBody = FINANCIAL_SLIDE_OUTLINE.map((line, i) => `${i + 1}. ${line}`);
+  const orgBody = [
+    '',
+    '## Leadership slides (11–12) — separate from financial metrics',
+    ...ORG_INTEL_SLIDE_OUTLINE.map((line, i) => `${i + 11}. ${line}`),
+  ];
+  const orgDetail = orgCxo ? ['', orgCxo.org_slide_markdown, '', orgCxo.cxo_slide_markdown] : [];
   const footerRepeat = [
     '',
     '## Footer reminder',
     `Every slide inherits the master footer: **${company}** logo left, **${provider}** logo right.`,
-    JSON.stringify(slideMaster.footer, null, 2),
   ];
-  return header.concat(body).concat(footerRepeat).join('\n');
+  return header.concat(financialBody).concat(orgBody).concat(orgDetail).concat(footerRepeat).join('\n');
 }
 
 function buildPresentationPackage(state) {
@@ -178,17 +208,20 @@ function buildPresentationPackage(state) {
     company: resolveLogoAsset('company', state),
     provider: resolveLogoAsset('provider', state),
   };
+  const orgCxo = buildOrgCxoIntel(state);
   const slideMaster = buildDeckSlideMaster(logos);
-  const slidesJson = buildSlidesJson(state, logos, slideMaster);
-  const gammaMarkdown = buildGammaDeckMarkdown(state, logos, slideMaster);
-  const promptText = buildExecutivePresentationPrompt(state, { logos, slideMaster, slidesJson, gammaMarkdown });
+  const slidesJson = buildSlidesJson(state, logos, slideMaster, orgCxo);
+  const gammaMarkdown = buildGammaDeckMarkdown(state, logos, slideMaster, orgCxo);
+  const promptText = buildExecutivePresentationPrompt(state, { logos, slideMaster, slidesJson, gammaMarkdown, orgCxo });
   return {
     slide_count: DECK_SLIDE_COUNT,
+    financial_slide_count: FINANCIAL_SLIDE_COUNT,
     slide_master: slideMaster,
     logos,
     slides_json: slidesJson,
     gamma_markdown: gammaMarkdown,
     prompt_text: promptText,
+    org_cxo_intel: orgCxo,
     logo_fallback_notes: slideMaster.logo_fallback_notes,
   };
 }
@@ -198,10 +231,12 @@ function buildGammaDeck(state) {
   return {
     generated_at: new Date().toISOString(),
     slide_count: pkg.slide_count,
+    financial_slide_count: pkg.financial_slide_count,
     slide_master: pkg.slide_master,
     logos: pkg.logos,
     slides_json: pkg.slides_json,
     gamma_markdown: pkg.gamma_markdown,
+    org_cxo_intel: pkg.org_cxo_intel,
     logo_fallback_notes: pkg.logo_fallback_notes,
   };
 }

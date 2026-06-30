@@ -17,6 +17,12 @@ state.delivery.payloads = {
     slides_field: 'gamma_deck.slides_json',
     markdown_field: 'gamma_deck.gamma_markdown',
   },
+  org_cxo_intel: {
+    action: 'render_leadership_slides',
+    artifact_field: 'org_cxo_intel',
+    org_slide: 'org_cxo_intel.org_slide_markdown',
+    cxo_slide: 'org_cxo_intel.cxo_slide_markdown',
+  },
   full_report: {
     action: 'copy_full_report_markdown',
     artifact_field: 'final_report_markdown',
@@ -27,6 +33,6 @@ state.audit_log.push({
   timestamp: new Date().toISOString(),
   workflow_name: 'WF_DELIVERY',
   status: 'OK',
-  message: 'Delivery payloads prepared (report + 10-slide deck with shared footer master).',
+  message: 'Delivery payloads prepared (report + 12-slide deck with leadership slides).',
 });
 return [{ json: state }];

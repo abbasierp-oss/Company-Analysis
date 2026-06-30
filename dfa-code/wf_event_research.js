@@ -53,7 +53,8 @@ if (ref8k) {
 
 const markdown = parts.join('\n');
 
-state.event_research = { generated_at: now, capital_structure_bullets: capitalBullets, leadership_bullet: leadershipBullet, recent_filings: filingEvents, markdown };
+state.org_cxo_intel = buildOrgCxoIntel(state);
+state.event_research = { generated_at: now, capital_structure_bullets: capitalBullets, leadership_bullet: leadershipBullet, recent_filings: filingEvents, org_cxo_intel: state.org_cxo_intel, markdown };
 state.sections = state.sections || {};
 state.sections.s7_rtbl = markdown;
 state.audit_log = state.audit_log || [];
