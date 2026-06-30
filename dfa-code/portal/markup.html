@@ -1,0 +1,96 @@
+<main class="wrap">
+    <header class="brand-bar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">S</div>
+        <div>
+          <h1>Stoic Analysis</h1>
+          <p>Executive financial intelligence with initiative-linked counsel</p>
+        </div>
+      </div>
+    </header>
+
+    <section class="hero">
+      <div class="card intro">
+        <div class="eyebrow">Financial &amp; Strategic Portal</div>
+        <h2>Live SEC financials, visual dashboard, and presentation prompt.</h2>
+        <p class="lead">Stoic Analysis fetches filing-backed metrics at run time, maps recommendations to your active IT initiatives, and renders a visual dashboard alongside your executive prompt.</p>
+        <div class="pillrow">
+          <span class="pill">SEC EDGAR</span>
+          <span class="pill">Initiative mapping</span>
+          <span class="pill">Visual dashboard</span>
+          <span class="pill">Peer benchmarks</span>
+          <span class="pill">Presentation prompt</span>
+        </div>
+      </div>
+      <div class="card">
+        <form id="dfaForm" action="#" method="post" onsubmit="return false;">
+          <div class="section-title">Company</div>
+          <div><label for="company_name">Company name</label><input id="company_name" name="company_name" placeholder="Example: Microsoft Corporation" required /></div>
+          <div><label for="ticker">Ticker symbol if public</label><input id="ticker" name="ticker" placeholder="Example: MSFT" /></div>
+
+          <div class="section-title">Executive context</div>
+          <div class="grid2">
+            <div><label for="exec_type">C-level executive</label><select id="exec_type" name="exec_type" required><option value="">Choose executive</option><option>CFO</option><option>CIO</option><option>CEO</option><option>COO</option><option>CDO</option><option>CISO</option><option>Board</option><option>Investor</option></select></div>
+            <div><label for="industry">Industry</label><input id="industry" name="industry" placeholder="Example: Technology, Media, Streaming" required /></div>
+          </div>
+          <div><label for="expert_pref">Industry expert to blend</label><input id="expert_pref" name="expert_pref" placeholder="Expert name or type: pick for me" required /></div>
+          <div class="grid2">
+            <div><label for="service_provider">Service provider name</label><input id="service_provider" name="service_provider" placeholder="Example: Evolo AI" /></div>
+            <input type="hidden" id="slide_count" name="slide_count" value="12" />
+          </div>
+
+          <div class="section-title">IT initiatives &amp; peers</div>
+          <div><label for="it_initiatives">Active IT initiatives (comma-separated)</label><input id="it_initiatives" name="it_initiatives" placeholder="Example: Cloud migration, ERP modernization, Data platform" aria-describedby="initHelp" /></div>
+          <p class="small" id="initHelp">Recommendations are tied only to initiatives you list here or disclose in source notes. Generic advice is withheld.</p>
+          <div><label for="peer_list">Peer products or competitors (optional)</label><input id="peer_list" name="peer_list" placeholder="Example: HBO Max, Disney+, Amazon Prime Video" /></div>
+          <div><label for="source_notes">Source URLs or notes</label><textarea id="source_notes" name="source_notes" placeholder="Investor relations URLs, initiative roadmaps, annual reports"></textarea></div>
+
+          <div><button id="runBtn" type="button">Run Stoic Analysis</button></div>
+          <div class="small">Runs typically take 5–10 minutes. Your entries remain on this page while processing.</div>
+        </form>
+      </div>
+    </section>
+
+    <section id="outputPanel" class="output-panel card box" aria-live="polite">
+      <div class="ornament">— ✦ —</div>
+      <p class="status-line small" id="outputStatus">Complete the form and click Run Stoic Analysis.</p>
+      <div class="bar" id="progressWrap" style="display:none;"><span id="progressBar"></span></div>
+      <p class="small" id="progressLabel"></p>
+
+      <div class="output-grid">
+        <div class="dashboard" id="dashboard">
+          <h2>Visual Dashboard</h2>
+          <div class="empty-dash" id="dashboardEmpty">Metrics and initiative impact charts will appear here when your analysis completes.</div>
+          <div id="dashboardContent" style="display:none;">
+            <div class="metric-grid" id="metricGrid"></div>
+            <div class="chart-block" id="financialChart">
+              <h3>Financial Performance</h3>
+              <div id="financialBars"></div>
+            </div>
+            <div class="chart-block" id="peerChart" style="display:none;">
+              <h3>SEC Financial Peer Margins</h3>
+              <div id="peerBars"></div>
+            </div>
+            <div class="chart-block" id="competitorBlock" style="display:none;">
+              <h3 id="competitorTitle">Competitor Comparison</h3>
+              <p class="small" id="competitorSubtitle"></p>
+              <div id="competitorCards"></div>
+            </div>
+            <div class="chart-block" id="initiativeBlock" style="display:none;">
+              <h3>Initiative Impact</h3>
+              <div id="initiativeCards"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="prompt-side">
+          <div class="prompt-label">
+            <h2>Presentation Prompt</h2>
+            <button class="secondary" id="copyPrompt" type="button" disabled aria-live="polite">Copy</button>
+          </div>
+          <pre id="promptOutput">Your presentation prompt will appear here. Paste it into Gamma, Canva, or PowerPoint Copilot when ready.</pre>
+          <p class="small" id="copyNotice"></p>
+        </div>
+      </div>
+    </section>
+  </main>
